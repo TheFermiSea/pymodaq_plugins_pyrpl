@@ -70,7 +70,8 @@ class DAQ_Move_Template(DAQ_Move_base):
         """
         ## TODO for your custom plugin
         raise NotImplementedError  # when writing your own plugin remove this line
-        pos = DataActuator(data=self.controller.your_method_to_get_the_actuator_value())  # when writing your own plugin replace this line
+        pos = DataActuator(data=self.controller.your_method_to_get_the_actuator_value(),  # when writing your own plugin replace this line
+                           units=self.axis_unit)
         pos = self.get_position_with_scaling(pos)
         return pos
 
@@ -153,7 +154,7 @@ class DAQ_Move_Template(DAQ_Move_base):
         value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
         ## TODO for your custom plugin
         raise NotImplementedError  # when writing your own plugin remove this line
-        self.controller.your_method_to_set_an_absolute_value(value.value())  # when writing your own plugin replace this line
+        self.controller.your_method_to_set_an_absolute_value(value.value(self.axis_unit))  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def move_rel(self, value: DataActuator):
@@ -169,7 +170,7 @@ class DAQ_Move_Template(DAQ_Move_base):
 
         ## TODO for your custom plugin
         raise NotImplementedError  # when writing your own plugin remove this line
-        self.controller.your_method_to_set_a_relative_value(value.value())  # when writing your own plugin replace this line
+        self.controller.your_method_to_set_a_relative_value(value.value(self.axis_unit))  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def move_home(self):
