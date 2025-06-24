@@ -82,7 +82,7 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
             False if initialization failed otherwise True
         """
 
-        raise NotImplemented  # TODO when writing your own plugin remove this line and modify the one below
+        raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the one below
         self.ini_detector_init(slave_controller=controller)
 
         if self.is_master:
@@ -103,7 +103,7 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
     def close(self):
         """Terminate the communication protocol"""
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
 
     def grab_data(self, Naverage=1, **kwargs):
@@ -120,7 +120,7 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
         ## TODO for your custom plugin: you should choose EITHER the synchrone or the asynchrone version following
 
         # synchrone version (blocking function)
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         data_tot = self.controller.your_method_to_start_a_grab_snap()
         self.dte_signal.emit(DataToExport(name='myplugin',
                                           data=[DataFromPlugins(name='Mock1', data=data_tot,
@@ -128,7 +128,7 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
         #########################################################
 
         # asynchrone version (non-blocking function with callback)
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         self.controller.your_method_to_start_a_grab_snap(self.callback)  # when writing your own plugin replace this line
         #########################################################
 
@@ -143,7 +143,7 @@ class DAQ_0DViewer_Template(DAQ_Viewer_base):
     def stop(self):
         """Stop the current grab hardware wise if necessary"""
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         self.controller.your_method_to_stop_acquisition()  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
         ##############################
