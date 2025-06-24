@@ -181,12 +181,12 @@ class DAQ_Move_Template(DAQ_Move_base):
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def stop_motion(self):
-      """Stop the actuator and emits move_done signal"""
+        """Stop the actuator and emits move_done signal"""
 
-      ## TODO for your custom plugin
-      raise NotImplementedError  # when writing your own plugin remove this line
-      self.controller.your_method_to_stop_positioning()  # when writing your own plugin replace this line
-      self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
+        ## TODO for your custom plugin
+        raise NotImplementedError  # when writing your own plugin remove this line
+        self.controller.your_method_to_stop_positioning()  # when writing your own plugin replace this line
+        self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
 
 if __name__ == '__main__':
