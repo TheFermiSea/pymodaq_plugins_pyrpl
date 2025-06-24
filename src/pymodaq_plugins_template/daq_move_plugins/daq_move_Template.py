@@ -130,15 +130,16 @@ class DAQ_Move_Template(DAQ_Move_base):
             False if initialization failed otherwise True
         """
         raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the ones below
-        self.ini_stage_init(slave_controller=controller)  # will be useful when controller is slave
-
         if self.is_master:  # is needed when controller is master
             self.controller = PythonWrapperOfYourInstrument(arg1, arg2, ...) #  arguments for instantiation!)
+            initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # todo
             # todo: enter here whatever is needed for your controller initialization and eventual
             #  opening of the communication channel
+        else:
+            self.controller = controller
+            initialized = True
 
         info = "Whatever info you want to log"
-        initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # todo
         return info, initialized
 
     def move_abs(self, value: DataActuator):
