@@ -69,8 +69,9 @@ class DAQ_Move_Template(DAQ_Move_base):
         float: The position obtained after scaling conversion.
         """
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        pos = DataActuator(data=self.controller.your_method_to_get_the_actuator_value())  # when writing your own plugin replace this line
+        raise NotImplementedError  # when writing your own plugin remove this line
+        pos = DataActuator(data=self.controller.your_method_to_get_the_actuator_value(),  # when writing your own plugin replace this line
+                           units=self.axis_unit)
         pos = self.get_position_with_scaling(pos)
         return pos
 
@@ -91,8 +92,10 @@ class DAQ_Move_Template(DAQ_Move_base):
     def close(self):
         """Terminate the communication protocol"""
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
+        raise NotImplementedError  # when writing your own plugin remove this line
+        if self.is_master:
+            #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
+            ...
 
     def commit_settings(self, param: Parameter):
         """Apply the consequences of a change of value in the detector settings
@@ -128,16 +131,17 @@ class DAQ_Move_Template(DAQ_Move_base):
         initialized: bool
             False if initialization failed otherwise True
         """
-        raise NotImplemented  # TODO when writing your own plugin remove this line and modify the ones below
-        self.ini_stage_init(slave_controller=controller)  # will be useful when controller is slave
-
+        raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the ones below
         if self.is_master:  # is needed when controller is master
             self.controller = PythonWrapperOfYourInstrument(arg1, arg2, ...) #  arguments for instantiation!)
+            initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # todo
             # todo: enter here whatever is needed for your controller initialization and eventual
             #  opening of the communication channel
+        else:
+            self.controller = controller
+            initialized = True
 
         info = "Whatever info you want to log"
-        initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # todo
         return info, initialized
 
     def move_abs(self, value: DataActuator):
@@ -152,8 +156,8 @@ class DAQ_Move_Template(DAQ_Move_base):
         self.target_value = value
         value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        self.controller.your_method_to_set_an_absolute_value(value.value())  # when writing your own plugin replace this line
+        raise NotImplementedError  # when writing your own plugin remove this line
+        self.controller.your_method_to_set_an_absolute_value(value.value(self.axis_unit))  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def move_rel(self, value: DataActuator):
@@ -168,25 +172,25 @@ class DAQ_Move_Template(DAQ_Move_base):
         value = self.set_position_relative_with_scaling(value)
 
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        self.controller.your_method_to_set_a_relative_value(value.value())  # when writing your own plugin replace this line
+        raise NotImplementedError  # when writing your own plugin remove this line
+        self.controller.your_method_to_set_a_relative_value(value.value(self.axis_unit))  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def move_home(self):
         """Call the reference method of the controller"""
 
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         self.controller.your_method_to_get_to_a_known_reference()  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
     def stop_motion(self):
-      """Stop the actuator and emits move_done signal"""
+        """Stop the actuator and emits move_done signal"""
 
-      ## TODO for your custom plugin
-      raise NotImplemented  # when writing your own plugin remove this line
-      self.controller.your_method_to_stop_positioning()  # when writing your own plugin replace this line
-      self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
+        ## TODO for your custom plugin
+        raise NotImplementedError  # when writing your own plugin remove this line
+        self.controller.your_method_to_stop_positioning()  # when writing your own plugin replace this line
+        self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
 
 if __name__ == '__main__':

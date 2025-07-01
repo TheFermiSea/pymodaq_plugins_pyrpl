@@ -82,12 +82,14 @@ class DAQ_2DViewer_Template(DAQ_Viewer_base):
         initialized: bool
             False if initialization failed otherwise True
         """
-        raise NotImplemented  # TODO when writing your own plugin remove this line and modify the one below
-        self.ini_detector_init(slave_controller=controller)
-
+        raise NotImplementedError  # TODO when writing your own plugin remove this line and modify the one below
         if self.is_master:
             self.controller = PythonWrapperOfYourInstrument()  #instantiate you driver with whatever arguments are needed
             self.controller.open_communication() # call eventual methods
+            initialized = self.controller.a_method_or_atttribute_to_check_if_init()  # TODO
+        else:
+            self.controller = controller
+            initialized = True
 
         ## TODO for your custom plugin
         # get the x_axis (you may want to to this also in the commit settings if x_axis may have changed
@@ -105,14 +107,15 @@ class DAQ_2DViewer_Template(DAQ_Viewer_base):
                                                                      axes=[self.x_axis, self.y_axis]), ]))
 
         info = "Whatever info you want to log"
-        initialized = True
         return info, initialized
 
     def close(self):
         """Terminate the communication protocol"""
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
+        raise NotImplementedError  # when writing your own plugin remove this line
+        if self.is_master:
+            #  self.controller.your_method_to_terminate_the_communication()  # when writing your own plugin replace this line
+            ...
 
     def grab_data(self, Naverage=1, **kwargs):
         """Start a grab from the detector
@@ -150,7 +153,7 @@ class DAQ_2DViewer_Template(DAQ_Viewer_base):
     def stop(self):
         """Stop the current grab hardware wise if necessary"""
         ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
+        raise NotImplementedError  # when writing your own plugin remove this line
         self.controller.your_method_to_stop_acquisition()  # when writing your own plugin replace this line
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
         ##############################
