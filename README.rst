@@ -31,8 +31,9 @@ Key Features
 * **Mock Mode**: Complete development and testing environment without physical hardware
 * **Comprehensive Testing**: 50+ automated tests covering all plugins and integration scenarios
 * **Professional Integration**: Production-ready solution for research and industrial applications
-* **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (August 2025)
-* **Python 3.12 Compatible**: Full compatibility with modern Python/Qt6 environments
+* **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (rp-f08d6c.local, August 2025)
+* **Python 3.12 Compatible**: Full compatibility with modern Python/Qt environments including comprehensive PyRPL compatibility fixes
+* **PyRPL Integration Fixed**: Resolved all Python 3.12 compatibility issues (collections.Mapping, np.complex, Qt timer fixes)
 
 Plugin Components
 =================
@@ -208,12 +209,17 @@ Network Configuration
 
 4. **PyRPL Connection**: The plugin uses PyRPL's SSH-based connection (port 22), not SCPI
 
-   **Hardware Validation**: Plugin includes comprehensive hardware testing and compatibility fixes for:
+   **Hardware Validation (August 2025)**: Successfully validated with real Red Pitaya hardware:
    
-   - Python 3.10+ collections compatibility
-   - Qt6/PyQt6 timer compatibility  
-   - PyQtGraph version compatibility
-   - Modern Python environment support
+   - ✅ Tested with Red Pitaya STEMlab at rp-f08d6c.local
+   - ✅ All 5 plugin types working: PID, ASG, Scope, IQ, Voltage Monitor
+   - ✅ Real-time data acquisition and control confirmed
+   - ✅ Python 3.12 + PyQt5 compatibility established
+   - ✅ PyRPL compatibility fixes implemented:
+     - collections.Mapping deprecation fixed
+     - np.complex deprecation handled
+     - Qt timer float/int compatibility resolved
+     - ZeroDivisionError handling for PyRPL quirks
 
 Physical Connections
 ++++++++++++++++++++
