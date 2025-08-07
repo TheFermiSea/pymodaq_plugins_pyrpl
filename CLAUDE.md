@@ -106,7 +106,7 @@ flake8 .
 
 ## Key PyRPL Integration Points
 
-**Connection**: Use hostname (e.g., 'rp-f0a552.local' or IP address)
+**Connection**: Use hostname (e.g., 'rp-f08d6c.local' or IP address)
 
 **PID Control**: 
 - `pid.setpoint` = target voltage
@@ -157,7 +157,7 @@ flake8 .
 ```python
 # Configure PID for laser power stabilization
 pid_params = {
-    'redpitaya_host': 'rp-f0a552.local',
+    'redpitaya_host': 'rp-f08d6c.local',
     'pid_module': 'pid0',
     'input_channel': 'in1',    # photodiode signal
     'output_channel': 'out1',   # laser control
@@ -170,7 +170,7 @@ pid_params = {
 ```python
 # Configure ASG for modulation or stimulus
 asg_params = {
-    'redpitaya_host': 'rp-f0a552.local',
+    'redpitaya_host': 'rp-f08d6c.local',
     'asg_channel': 'asg0',
     'frequency': 1000.0,        # Hz
     'amplitude': 0.5,           # V
@@ -183,7 +183,7 @@ asg_params = {
 ```python
 # Configure scope for transient capture
 scope_params = {
-    'redpitaya_host': 'rp-f0a552.local',
+    'redpitaya_host': 'rp-f08d6c.local',
     'input_channel': 'in1',
     'decimation': 64,           # 1.95 MS/s effective rate
     'trigger_source': 'ch1_positive_edge',
@@ -196,7 +196,7 @@ scope_params = {
 ```python
 # Configure IQ for weak signal recovery
 iq_params = {
-    'redpitaya_host': 'rp-f0a552.local',
+    'redpitaya_host': 'rp-f08d6c.local',
     'iq_module': 'iq0',
     'input_channel': 'in1',
     'frequency': 1000.0,        # reference frequency

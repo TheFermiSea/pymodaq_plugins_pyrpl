@@ -32,7 +32,7 @@ class PIDModelPyrpl(PIDModelGeneric):
     detectors_name = []  # names of detector's control modules involved in the PID
 
     params = [
-        {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str', 'value': 'rp-f0a552.local'},
+        {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str', 'value': 'rp-f08d6c.local'},
         {'title': 'Input channel:', 'name': 'input_channel', 'type': 'list', 'limits': ['in1', 'in2'], 'value': 'in1'},
         {'title': 'Output channel:', 'name': 'output_channel', 'type': 'list', 'limits': ['out1', 'out2'], 'value': 'out1'},
         {'title': 'PID channel:', 'name': 'pid_channel', 'type': 'list', 'limits': ['pid0', 'pid1', 'pid2'], 'value': 'pid0'},

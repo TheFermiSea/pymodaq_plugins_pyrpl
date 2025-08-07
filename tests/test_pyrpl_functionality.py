@@ -537,7 +537,7 @@ class TestDAQMovePyRPLPID:
     def test_plugin_parameters(self, mock_move_plugin):
         """Test plugin parameter structure and defaults."""
         # Check connection parameters
-        assert mock_move_plugin.settings.child('connection_settings', 'redpitaya_host').value() == 'rp-f0a552.local'
+        assert mock_move_plugin.settings.child('connection_settings', 'redpitaya_host').value() == 'rp-f08d6c.local'
         assert mock_move_plugin.settings.child('connection_settings', 'config_name').value() == 'pymodaq'
         assert mock_move_plugin.settings.child('connection_settings', 'mock_mode').value() is False
         
@@ -684,7 +684,7 @@ class TestDAQ0DViewerPyRPL:
         """Test viewer plugin parameter structure."""
         # Check connection parameters exist
         conn_group = mock_viewer_plugin.settings.child('connection')
-        assert conn_group.child('redpitaya_host').value() == 'rp-f0a552.local'
+        assert conn_group.child('redpitaya_host').value() == 'rp-f08d6c.local'
         assert conn_group.child('config_name').value() == 'pymodaq_viewer'
         assert conn_group.child('mock_mode').value() is False
         
@@ -1098,7 +1098,7 @@ class TestRealHardware:
     3. Tests are run with -m hardware
     
     Example usage:
-        PYRPL_TEST_HOST=rp-f0a552.local pytest -m hardware
+        PYRPL_TEST_HOST=rp-f08d6c.local pytest -m hardware
     """
 
     @pytest.fixture(autouse=True)

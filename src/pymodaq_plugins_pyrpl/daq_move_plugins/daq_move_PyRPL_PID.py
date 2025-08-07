@@ -95,7 +95,7 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
     params = [
         {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
             {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str', 
-             'value': 'rp-f0a552.local', 'tip': 'Red Pitaya hostname or IP address'},
+             'value': 'rp-f08d6c.local', 'tip': 'Red Pitaya hostname or IP address'},
             {'title': 'Config Name:', 'name': 'config_name', 'type': 'str', 
              'value': 'pymodaq', 'tip': 'PyRPL configuration name'},
             {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float', 
