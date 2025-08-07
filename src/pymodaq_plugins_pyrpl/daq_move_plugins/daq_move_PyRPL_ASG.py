@@ -98,7 +98,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     params = [
         {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
             {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str', 
-             'value': 'rp-f0a552.local', 'tip': 'Red Pitaya hostname or IP address'},
+             'value': 'rp-f08d6c.local', 'tip': 'Red Pitaya hostname or IP address'},
             {'title': 'Config Name:', 'name': 'config_name', 'type': 'str', 
              'value': 'pymodaq', 'tip': 'PyRPL configuration name'},
             {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float', 
@@ -146,7 +146,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             {'title': 'Debug Logging:', 'name': 'debug_logging', 'type': 'bool', 'value': False,
              'tip': 'Enable detailed debug logging'},
         ]},
-    ]
+    ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
 
     def ini_attributes(self) -> None:
         """

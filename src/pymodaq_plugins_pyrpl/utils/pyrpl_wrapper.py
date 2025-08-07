@@ -21,6 +21,13 @@ from enum import Enum
 
 import numpy as np
 try:
+    # Python 3.10+ compatibility fix for collections.Mapping
+    import collections.abc
+    import collections
+    if not hasattr(collections, 'Mapping'):
+        collections.Mapping = collections.abc.Mapping
+        collections.MutableMapping = collections.abc.MutableMapping
+    
     import pyrpl
     PYRPL_AVAILABLE = True
     from pyrpl.hardware_modules.pid import PidModule
@@ -1630,7 +1637,7 @@ def connect_redpitaya(hostname: str, config_name: str = "pymodaq",
         Connected PyRPLConnection instance or None if failed
         
     Example:
-        >>> connection = connect_redpitaya('rp-f0a552.local')
+        >>> connection = connect_redpitaya('rp-f08d6c.local')
         >>> if connection and connection.is_connected:
         ...     voltage = connection.read_voltage(InputChannel.IN1)
         ...     print(f"Input voltage: {voltage}V")

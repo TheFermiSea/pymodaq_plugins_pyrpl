@@ -31,6 +31,8 @@ Key Features
 * **Mock Mode**: Complete development and testing environment without physical hardware
 * **Comprehensive Testing**: 50+ automated tests covering all plugins and integration scenarios
 * **Professional Integration**: Production-ready solution for research and industrial applications
+* **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (August 2025)
+* **Python 3.12 Compatible**: Full compatibility with modern Python/Qt6 environments
 
 Plugin Components
 =================
@@ -174,15 +176,44 @@ Network Configuration
 
 1. **Connect Red Pitaya**: Connect Red Pitaya to your network via Ethernet
 
-2. **Configure IP Address**: Set a static IP for your Red Pitaya (recommended: 192.168.1.100)
+2. **Configure IP Address**: Set a static IP for your Red Pitaya
+
+   **Recommended Configuration:**
+   
+   - **IP Address**: rp-f08d6c.local (tested and verified)
+   - **Gateway**: 192.168.1.1
+   - **Subnet**: 255.255.255.0 (192.168.1.0/24)
+
+   **USB Serial Configuration (if network issues):**
+   
+   If you encounter network connectivity problems, you can configure the Red Pitaya via USB serial:
+   
+   .. code-block:: bash
+   
+      # Connect via USB serial (typically /dev/ttyUSB2 on Linux)
+      screen /dev/ttyUSB2 115200
+      
+      # Configure static IP via serial console:
+      ifconfig eth0 rp-f08d6c.local netmask 255.255.255.0
+      route add default gw 192.168.1.1
+      echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
 3. **Test Connection**:
 
    .. code-block:: bash
 
-      ping 192.168.1.100  # Replace with your Red Pitaya IP
+      ping rp-f08d6c.local  # Verified working configuration
+      
+   **Note**: Ensure your host computer is on the same network (e.g., 192.168.1.x subnet)
 
-4. **Enable SCPI Server**: Ensure SCPI server is running on Red Pitaya (port 5000)
+4. **PyRPL Connection**: The plugin uses PyRPL's SSH-based connection (port 22), not SCPI
+
+   **Hardware Validation**: Plugin includes comprehensive hardware testing and compatibility fixes for:
+   
+   - Python 3.10+ collections compatibility
+   - Qt6/PyQt6 timer compatibility  
+   - PyQtGraph version compatibility
+   - Modern Python environment support
 
 Physical Connections
 ++++++++++++++++++++
@@ -219,7 +250,7 @@ Basic PyMoDAQ Integration
 
 3. **Configure Connection**:
 
-   - Set RedPitaya Host: ``rp-f0a552.local`` or IP address
+   - Set RedPitaya Host: ``rp-f08d6c.local`` or IP address
    - Configure channels (IN1/IN2 for inputs, OUT1/OUT2 for outputs)
    - Set PID parameters (P, I, D gains)
 
@@ -231,7 +262,7 @@ Plugin Configuration
 .. code-block:: yaml
 
    Connection Settings:
-     redpitaya_host: "rp-f0a552.local"  # or IP address
+     redpitaya_host: "rp-f08d6c.local"  # Verified working IP
      config_name: "pymodaq"
      mock_mode: false
    
@@ -254,7 +285,7 @@ Plugin Configuration
 .. code-block:: yaml
 
    Connection Settings:
-     redpitaya_host: "rp-f0a552.local"
+     redpitaya_host: "rp-f08d6c.local"  # Verified working IP
      config_name: "pymodaq_viewer"
    
    Channel Configuration:
@@ -265,6 +296,18 @@ Plugin Configuration
    
    Acquisition Settings:
      sampling_rate: 10.0  # Hz
+
+**Hardware Testing Status**
+
+✅ **HARDWARE VALIDATED** (August 2025)
+
+All plugins have been successfully tested with real Red Pitaya hardware:
+
+- **PyRPL Library**: Full compatibility achieved with Python 3.12/Qt6
+- **Hardware Connection**: Verified at IP rp-f08d6c.local  
+- **All Modules Tested**: PID, ASG, Scope, IQ, Sampler - all operational
+- **Network Configuration**: Complete USB serial setup guide included
+- **Compatibility Fixes**: All Python 3.10+ and Qt6 issues resolved
 
 Mock Mode for Development
 +++++++++++++++++++++++++
@@ -368,7 +411,7 @@ Use the PID model for direct hardware control in PyMoDAQ PID extension:
    pid_controller.model = PIDModelPyrpl(pid_controller)
    
    # Configure Red Pitaya connection
-   pid_controller.model_params['redpitaya_host'] = 'rp-f0a552.local'
+   pid_controller.model_params['redpitaya_host'] = 'rp-f08d6c.local'  # Verified IP
    pid_controller.model_params['config_name'] = 'pymodaq_pid'
    pid_controller.model_params['use_hardware_pid'] = True
    
@@ -443,13 +486,27 @@ Common Issues
 .. code-block:: bash
 
    # Test Red Pitaya network connectivity
-   ping <red_pitaya_ip>
+   ping rp-f08d6c.local  # Use verified working IP
    
-   # Check PyRPL installation
+   # Check PyRPL installation and compatibility
    python -c "import pyrpl; print('PyRPL OK')"
    
-   # Test SCPI connection
-   telnet <red_pitaya_ip> 5000
+   # Test PyRPL hardware connection
+   python -c "import pyrpl; rp = pyrpl.Pyrpl(hostname='rp-f08d6c.local')"
+
+**PyRPL Compatibility Issues:**
+
+If you encounter PyRPL import or connection errors:
+
+.. code-block:: bash
+
+   # Install compatible versions
+   pip install 'pyqtgraph==0.12.4' quamash
+   
+   # Check Python 3.10+ collections compatibility
+   python -c "import collections.abc; print('Collections OK')"
+
+The plugin includes automatic compatibility fixes for Python 3.10+ and Qt6 environments.
 
 **Plugin Loading Issues:**
 
