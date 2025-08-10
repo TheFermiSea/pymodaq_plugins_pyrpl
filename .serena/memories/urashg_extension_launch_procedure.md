@@ -1,0 +1,1 @@
+To run the URASHG Microscopy Extension, use the `launch_urashg_extension.py` script from the root of the `pymodaq_plugins_urashg` project directory. This script correctly initializes the PyMoDAQ dashboard and the extension, and it ensures that the `pymodaq_plugins_urashg` package is in the python path. The command to run is `python launch_urashg_extension.py`.
