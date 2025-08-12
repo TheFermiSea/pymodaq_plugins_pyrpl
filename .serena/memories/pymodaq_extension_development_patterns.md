@@ -1,187 +1,147 @@
-# PyMoDAQ Extension Development Patterns - Lessons Learned
+# PyMoDAQ v5 Extension Development Patterns - Standards-Compliant Guide
 
-## Extension Architecture Best Practices
+## PyMoDAQ v5 Architecture Overview
+
+PyMoDAQ v5 introduced **modular package architecture** with specialized components. Extension development must follow v5 patterns for proper integration with the dashboard framework.
+
+## v5-Compliant Extension Architecture
 
 ### CustomApp Base Class Implementation
-**Pattern**: Inherit from `CustomApp` for comprehensive multi-device extensions
+**Pattern**: Standard PyMoDAQ v5 extension inheritance
 ```python
-from pymodaq.extensions.custom_app import CustomApp
+from pymodaq_gui.utils.custom_app import CustomApp  # v5 import path
 
 class URASHGMicroscopyExtension(CustomApp):
     def __init__(self, dockarea, dashboard):
         super().__init__(dockarea, dashboard)
-        # Extension-specific initialization
+        # Access PyMoDAQ's module management system
+        self.modules_manager = self.dashboard.modules_manager
+        self.available_modules = {}
+        self.required_modules = ['MaiTai', 'Elliptec', 'PrimeBSI', 'Newport1830C']
 ```
 
-**Key Benefits**:
+**Key v5 Benefits**:
 - Automatic PyMoDAQ framework integration
 - Standard extension lifecycle management  
-- Built-in dock management capabilities
-- Access to dashboard modules and resources
+- Built-in dashboard module access
+- Compliant with PyMoDAQ v5 standards
 
-### Dock-Based UI Layout Strategy
-**Pattern**: Use specialized docks for different functional areas
+### Standard Module Access (v5 Dashboard Integration)
+**Pattern**: Use PyMoDAQ's built-in module management system
 ```python
-self.docks = {}
-dock_configs = [
-    ('control_panel', 'Control Panel', 'bottom'),
-    ('device_control', 'Device Control', 'left'), 
-    ('camera_preview', 'Camera Preview', 'right'),
-    ('analysis_plots', 'Analysis Plots', 'top'),
-    ('status_monitor', 'Status Monitor', 'bottom')
-]
-
-for dock_name, title, position in dock_configs:
-    self.docks[dock_name] = self.dockarea.add_dock(
-        name=dock_name, title=title, position=position
-    )
-```
-
-**Advantages**:
-- Modular UI organization
-- User-customizable layout
-- Clear separation of functionality
-- Professional appearance
-
-### Parameter Tree Organization
-**Pattern**: Hierarchical parameter structure with logical grouping
-```python
-params = [
-    {'name': 'experiment', 'type': 'group', 'children': [
-        {'name': 'pol_steps', 'type': 'int', 'value': 36, 'min': 1, 'max': 360},
-        {'name': 'integration_time', 'type': 'float', 'value': 100.0, 'min': 1.0, 'max': 10000.0, 'suffix': 'ms'},
-    ]},
-    {'name': 'hardware', 'type': 'group', 'children': [
-        {'name': 'camera', 'type': 'group', 'children': [...]},
-        {'name': 'rotators', 'type': 'group', 'children': [...]},
-    ]},
-]
-```
-
-**Best Practices**:
-- Group related parameters logically
-- Include min/max bounds for validation
-- Add units with 'suffix' parameter
-- Use descriptive parameter names
-- Include 'tip' for user guidance
-
-## Device Management Patterns
-
-### Centralized Device Manager
-**Pattern**: Single manager class for all device coordination
-```python
-class URASHGDeviceManager(QObject):
-    # Signals for device status updates
-    device_status_changed = Signal(str, str)
-    device_error = Signal(str, str)
-    all_devices_ready = Signal(bool)
+class URASHGMicroscopyExtension(CustomApp):
+    def get_required_modules(self):
+        """Access modules through PyMoDAQ's standard API"""
+        if not self.modules_manager:
+            return {}
+            
+        actuators = self.modules_manager.actuators
+        detectors = self.modules_manager.detectors
+        
+        # Find specific modules loaded in dashboard
+        modules = {
+            'laser': self.find_module(actuators, 'MaiTai'),
+            'rotators': self.find_module(actuators, 'Elliptec'),  
+            'camera': self.find_module(detectors, 'PrimeBSI'),
+            'power_meter': self.find_module(detectors, 'Newport1830C')
+        }
+        
+        return {k: v for k, v in modules.items() if v is not None}
     
-    def __init__(self, dashboard):
-        self.dashboard = dashboard
-        self.modules_manager = dashboard.modules_manager
-        self.devices = {}
-        self.discover_devices()
+    def find_module(self, module_dict, name_pattern):
+        """Find module by name pattern"""
+        if not module_dict:
+            return None
+        for module_name, module in module_dict.items():
+            if name_pattern.lower() in module_name.lower():
+                return module
+        return None
 ```
 
-**Key Features**:
-- Device discovery and validation
-- Status monitoring with Qt signals
-- Coordinated multi-device operations
-- Safety checking and error handling
+**Critical v5 Standards Compliance**:
+- ✅ Uses `dashboard.modules_manager` (PyMoDAQ v5 standard)
+- ✅ Accesses hardware ONLY through PyMoDAQ plugins  
+- ✅ Respects PyMoDAQ module lifecycle
+- ❌ NEVER create custom device managers (violates PyMoDAQ standards)
 
-### Device Discovery Strategy
-**Pattern**: Pattern matching for flexible device detection
+### Extension Entry Points (v5 Configuration)
+**Pattern**: Standard PyMoDAQ v5 extension registration
 ```python
-REQUIRED_DEVICES = {
-    'camera': {
-        'type': 'viewer',
-        'name_patterns': ['PrimeBSI', 'Camera'],
-        'description': 'Primary camera for SHG detection',
-        'required': True,
-    },
-    # ... other devices
-}
+# Required module constants
+EXTENSION_NAME = 'μRASHG Microscopy'
+CLASS_NAME = 'URASHGMicroscopyExtension'
 
-def _find_device_module(self, device_key, device_config):
-    device_type = device_config['type']
-    name_patterns = device_config['name_patterns']
+# pyproject.toml entry point (v5 style)
+[project.entry-points."pymodaq.extensions"]
+"URASHGMicroscopyExtension" = "package.extensions.module:URASHGMicroscopyExtension"
+```
+
+**Configuration Requirements**:
+- Entry points in `pyproject.toml` (NOT `plugin_info.toml`)
+- Standard extension constants defined
+- Extension class inherits from CustomApp
+- Located in `extensions/` subdirectory
+
+## Plugin Integration Patterns (v5)
+
+### Hardware Control via PyMoDAQ Plugins
+**Pattern**: All hardware access via PyMoDAQ plugins (v5 STANDARD)
+```python
+def control_laser_wavelength(self, wavelength):
+    """Control laser via PyMoDAQ actuator module"""
+    modules = self.get_required_modules()
+    laser_module = modules.get('laser')
     
-    modules = self.available_modules.get(device_type, {})
-    for module_name in modules.keys():
-        for pattern in name_patterns:
-            if pattern.lower() in module_name.lower():
-                return DeviceInfo(device_key, device_type, module_name)
-```
+    if laser_module:
+        # Use PyMoDAQ's DataActuator for single-axis control (v5)
+        from pymodaq_data.datamodel.data_actuator import DataActuator
+        position = DataActuator(data=[wavelength])
+        laser_module.move_abs(position)
+        return True
+    return False
 
-**Advantages**:
-- Flexible device naming
-- Graceful handling of missing devices
-- Clear device type organization
-- Extensible device configuration
-
-## Threading and Signal Patterns
-
-### Thread-Safe Measurement Workers
-**Pattern**: Use Qt threading with moveToThread for non-blocking operations
-```python
-class MeasurementWorker(QObject):
-    progress_updated = Signal(int, str)
-    measurement_complete = Signal(dict)
-    error_occurred = Signal(str)
+def acquire_camera_data(self):
+    """Acquire data via PyMoDAQ detector module"""
+    modules = self.get_required_modules()
+    camera_module = modules.get('camera')
     
-    def run_measurement(self):
-        try:
-            # Long-running measurement operations
-            self.progress_updated.emit(50, "Acquiring data...")
-            # ... measurement logic
-            self.measurement_complete.emit(results)
-        except Exception as e:
-            self.error_occurred.emit(str(e))
+    if camera_module:
+        # Use PyMoDAQ's standard data acquisition
+        data = camera_module.grab_data()
+        return data
+    return None
 
-# Usage in extension
-self.worker = MeasurementWorker()
-self.measurement_thread = QThread()
-self.worker.moveToThread(self.measurement_thread)
-self.worker.progress_updated.connect(self.update_progress)
-```
-
-**Critical Points**:
-- Always use moveToThread, never subclass QThread
-- Use Qt signals for thread communication
-- Proper cleanup with thread.quit() and thread.wait()
-- No direct GUI updates from worker threads
-
-### Real-Time Status Monitoring
-**Pattern**: Timer-based status updates with Qt signals
-```python
-class URASHGDeviceManager(QObject):
-    def __init__(self):
-        self.status_timer = QTimer()
-        self.status_timer.timeout.connect(self.update_all_device_status)
-        self.status_timer.setInterval(5000)  # 5 seconds
+def control_rotator_positions(self, positions):
+    """Control multiple rotators via PyMoDAQ multi-axis plugin"""
+    modules = self.get_required_modules()
+    rotator_module = modules.get('rotators')
     
-    def update_all_device_status(self):
-        for device_key in self.devices.keys():
-            old_status = self.devices[device_key].status
-            new_status = self.check_device_status(device_key)
-            if old_status != new_status:
-                self.device_status_changed.emit(device_key, new_status.value)
+    if rotator_module:
+        # Use DataActuator for multi-axis control (v5)
+        from pymodaq_data.datamodel.data_actuator import DataActuator
+        position_data = DataActuator(data=positions)
+        rotator_module.move_abs(position_data)
+        return True
+    return False
 ```
 
-**Benefits**:
-- Non-blocking status updates
-- Real-time user feedback
-- Early error detection
-- System health monitoring
+**v5 Standards Compliance Benefits**:
+- ✅ Uses PyMoDAQ's plugin system exclusively
+- ✅ Respects module lifecycle and initialization
+- ✅ Standard data structures (DataActuator)
+- ✅ Integrates with PyMoDAQ's signal system
+- ✅ No direct hardware communication
 
-## Data Structure Patterns
+## v5 Data Structure Patterns
 
-### PyMoDAQ 5.x Data Structures
-**Pattern**: Proper DataWithAxes usage with source specification
+### PyMoDAQ v5 Data Structures (CRITICAL)
+**Pattern**: Proper v5 data structure usage
 ```python
-from pymodaq.utils.data import DataWithAxes, Axis, DataSource
+from pymodaq_data.datamodel import DataWithAxes, Axis, DataSource  # v5 paths
+from pymodaq_data.datamodel.data_actuator import DataActuator      # v5 specific
 
 def create_measurement_data(self, image_data, x_axis, y_axis):
+    """Create PyMoDAQ v5 compliant data structure"""
     return DataWithAxes(
         'RASHG_Measurement',
         data=[image_data],
@@ -190,288 +150,279 @@ def create_measurement_data(self, image_data, x_axis, y_axis):
             Axis('y', data=y_axis, units='pixels')
         ],
         units='counts',
-        source=DataSource.raw  # Required for PyMoDAQ 5.x
+        source=DataSource.raw  # Required for PyMoDAQ v5
+    )
+
+def create_polarimetry_data(self, intensities, angles):
+    """Create data for polarimetric measurements"""
+    return DataWithAxes(
+        'Polarimetric_SHG',
+        data=[intensities],
+        axes=[Axis('Polarization', data=angles, units='°')],
+        units='counts',
+        source=DataSource.raw
     )
 ```
 
-### DataActuator Patterns
-**CRITICAL**: Different patterns for single vs multi-axis devices
+### DataActuator Usage Patterns (v5 CRITICAL)
+**Pattern**: Different usage for single vs multi-axis devices
 ```python
-# Single-axis devices (MaiTai laser)
-def move_abs(self, position: Union[float, DataActuator]):
-    if isinstance(position, DataActuator):
-        target_value = float(position.value())  # Use .value()!
+# Single-axis devices (MaiTai laser) - v5 PATTERN
+def move_single_axis_device(self, position_value):
+    """Control single-axis device (laser wavelength)"""
+    from pymodaq_data.datamodel.data_actuator import DataActuator  # v5 path
+    position = DataActuator(data=[position_value])  # Single value in list
+    
+    modules = self.get_required_modules()
+    laser = modules.get('laser')
+    if laser:
+        laser.move_abs(position)
 
-# Multi-axis devices (Elliptec rotators)  
-def move_abs(self, positions: Union[List[float], DataActuator]):
-    if isinstance(positions, DataActuator):
-        target_array = positions.data[0]  # Use .data[0]!
+# Multi-axis devices (Elliptec rotators) - v5 PATTERN  
+def move_multi_axis_device(self, position_array):
+    """Control multi-axis device (3 rotators)"""
+    from pymodaq_data.datamodel.data_actuator import DataActuator  # v5 path
+    positions = DataActuator(data=position_array)  # Array of positions
+    
+    modules = self.get_required_modules()
+    rotators = modules.get('rotators')
+    if rotators:
+        rotators.move_abs(positions)
 ```
 
-**Common Mistake**: Using `.data[0][0]` for single-axis devices causes UI failures!
-
-## Configuration Management
-
-### JSON-Based Configuration
-**Pattern**: Hierarchical configuration with validation
+**CRITICAL v5 Pattern Notes**:
 ```python
-def save_configuration(self, filepath: str):
-    config = {
-        'experiment': {
-            'pol_steps': self.settings.child('experiment', 'pol_steps').value(),
-            'integration_time': self.settings.child('experiment', 'integration_time').value(),
-        },
-        'hardware': {
-            'camera': {
-                'roi': self.get_camera_roi_settings(),
-            },
-        },
-        # ... other sections
-    }
-    
-    with open(filepath, 'w') as f:
-        json.dump(config, f, indent=2)
-
-def load_configuration(self, filepath: str):
-    with open(filepath, 'r') as f:
-        config = json.load(f)
-    
-    # Validate configuration structure
-    self.validate_configuration(config)
-    
-    # Apply configuration to parameters
-    self.apply_configuration(config)
+# In plugin implementation (not extension):
+# Single-axis plugins: use position.value()
+# Multi-axis plugins: use positions.data[0]
 ```
 
-### Configuration Validation
-**Pattern**: Type and range checking for loaded configurations
+## Threading and Communication (v5)
+
+### Thread-Safe Operations with v5 Imports
+**Pattern**: Use Qt threading with proper v5 import paths
 ```python
-def validate_configuration(self, config: dict):
-    errors = []
+from qtpy.QtCore import QObject, QThread, Signal
+from pymodaq_utils.daq_utils import ThreadCommand  # v5 import path
+
+class MeasurementWorker(QObject):
+    progress_updated = Signal(int, str)
+    measurement_complete = Signal(dict)
+    error_occurred = Signal(str)
     
-    # Check required sections
-    required_sections = ['experiment', 'hardware']
-    for section in required_sections:
-        if section not in config:
-            errors.append(f"Missing required section: {section}")
-    
-    # Validate parameter values
-    if 'experiment' in config:
-        pol_steps = config['experiment'].get('pol_steps', 0)
-        if not isinstance(pol_steps, int) or pol_steps < 1 or pol_steps > 360:
-            errors.append(f"Invalid pol_steps: {pol_steps}")
-    
-    if errors:
-        raise ValueError(f"Configuration validation failed: {errors}")
-```
-
-## Analysis and Curve Fitting
-
-### RASHG Model Implementation
-**Pattern**: Scipy-based curve fitting with error handling
-```python
-from scipy.optimize import curve_fit
-
-def rashg_model(angle, I0, phi, offset):
-    """RASHG intensity model: I = I0 * sin^2(2*(angle - phi)) + offset"""
-    angle_rad = np.deg2rad(angle)
-    phi_rad = np.deg2rad(phi)
-    return I0 * np.sin(2 * (angle_rad - phi_rad))**2 + offset
-
-def fit_rashg_curve(self, angles, intensities):
-    try:
-        # Initial parameter guess
-        I0_guess = np.max(intensities) - np.min(intensities)
-        phi_guess = angles[np.argmax(intensities)] / 2  # Approximate phase
-        offset_guess = np.min(intensities)
+    def __init__(self, extension):
+        super().__init__()
+        self.extension = extension
         
-        popt, pcov = curve_fit(
-            rashg_model, 
-            angles, 
-            intensities, 
-            p0=[I0_guess, phi_guess, offset_guess]
-        )
-        
-        # Calculate fitting quality metrics
-        residuals = intensities - rashg_model(angles, *popt)
-        r_squared = 1 - (np.sum(residuals**2) / np.sum((intensities - np.mean(intensities))**2))
-        
-        return {
-            'parameters': popt,
-            'covariance': pcov,
-            'r_squared': r_squared,
-            'success': True
-        }
-        
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
+    def run_measurement(self):
+        """Execute measurement sequence using PyMoDAQ v5 modules"""
+        try:
+            # Access modules through extension's PyMoDAQ integration
+            modules = self.extension.get_required_modules()
+            
+            self.progress_updated.emit(10, "Initializing devices...")
+            
+            # Use PyMoDAQ modules for hardware control
+            camera = modules.get('camera')
+            rotators = modules.get('rotators')
+            
+            if not camera or not rotators:
+                self.error_occurred.emit("Required modules not available")
+                return
+                
+            self.progress_updated.emit(50, "Acquiring data...")
+            # ... measurement logic using PyMoDAQ modules
+            
+            self.measurement_complete.emit(results)
+            
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+# Usage in extension
+def start_measurement(self):
+    """Start measurement in separate thread"""
+    self.worker = MeasurementWorker(self)
+    self.measurement_thread = QThread()
+    self.worker.moveToThread(self.measurement_thread)
+    
+    # Connect signals
+    self.worker.progress_updated.connect(self.update_progress)
+    self.worker.measurement_complete.connect(self.on_measurement_complete)
+    self.worker.error_occurred.connect(self.on_measurement_error)
+    
+    # Start thread
+    self.measurement_thread.started.connect(self.worker.run_measurement)
+    self.measurement_thread.start()
 ```
 
-### Data Quality Assessment
-**Pattern**: Comprehensive data validation before analysis
+**Critical v5 Threading Points**:
+- Always use moveToThread, never subclass QThread
+- Use Qt signals for thread communication
+- Access PyMoDAQ modules through extension reference
+- Use proper v5 import paths for ThreadCommand
+- No direct GUI updates from worker threads
+
+## Parameter Management (v5)
+
+### Parameter Tree Organization
+**Pattern**: v5-compliant parameter structure
 ```python
-def assess_data_quality(self, angles, intensities):
-    issues = []
-    
-    # Check for empty data
-    if len(angles) == 0 or len(intensities) == 0:
-        issues.append("Empty data arrays provided")
-        return issues
-    
-    # Check array length matching
-    if len(angles) != len(intensities):
-        issues.append(f"Array length mismatch: {len(angles)} vs {len(intensities)}")
-    
-    # Check minimum data points
-    if len(angles) < 18:
-        issues.append(f"Insufficient data points: {len(angles)} < 18")
-    
-    # Check angle coverage
-    if len(angles) > 1:
-        angle_range = np.max(angles) - np.min(angles)
-        if angle_range < 90:
-            issues.append(f"Insufficient angle coverage: {angle_range:.1f}° < 90°")
-    
-    # Check for reasonable intensity values
-    if len(intensities) > 0:
-        if np.max(intensities) <= 0:
-            issues.append("All intensity values are non-positive")
-    
-    return issues
+from pymodaq_utils.parameter import Parameter  # v5 import path
+
+params = [
+    {'name': 'experiment', 'type': 'group', 'children': [
+        {'name': 'pol_steps', 'type': 'int', 'value': 36, 'min': 1, 'max': 360},
+        {'name': 'integration_time', 'type': 'float', 'value': 100.0, 
+         'min': 1.0, 'max': 10000.0, 'suffix': 'ms'},
+        {'name': 'wavelength', 'type': 'float', 'value': 800.0, 
+         'min': 750.0, 'max': 920.0, 'suffix': 'nm'},
+    ]},
+    {'name': 'hardware', 'type': 'group', 'children': [
+        {'name': 'camera', 'type': 'group', 'children': [
+            {'name': 'roi_width', 'type': 'int', 'value': 512},
+            {'name': 'roi_height', 'type': 'int', 'value': 512},
+        ]},
+        {'name': 'rotators', 'type': 'group', 'children': [
+            {'name': 'qwp_address', 'type': 'int', 'value': 2},
+            {'name': 'hwp_inc_address', 'type': 'int', 'value': 3},
+            {'name': 'hwp_ana_address', 'type': 'int', 'value': 8},
+        ]},
+    ]},
+]
 ```
 
-## Error Handling and Safety
+**v5 Parameter Best Practices**:
+- Group related parameters logically
+- Include min/max bounds for validation
+- Add units with 'suffix' parameter
+- Use descriptive parameter names
+- Include 'tip' for user guidance
 
-### Comprehensive Error Handling
+## Error Handling Patterns (v5)
+
+### Comprehensive Error Handling with v5 Standards
 **Pattern**: Multi-level error handling with user feedback
 ```python
-def safe_device_operation(self, operation_func, device_name, *args, **kwargs):
+from pymodaq_utils.logger import set_logger, get_module_name  # v5 imports
+
+logger = set_logger(get_module_name(__file__))
+
+def safe_module_operation(self, operation_func, module_name, *args, **kwargs):
+    """Safely execute operations on PyMoDAQ modules"""
     try:
-        logger.info(f"Starting {operation_func.__name__} on {device_name}")
-        result = operation_func(*args, **kwargs)
+        modules = self.get_required_modules()
+        module = modules.get(module_name)
+        
+        if not module:
+            error_msg = f"Module '{module_name}' not available - ensure it's loaded in dashboard"
+            logger.error(error_msg)
+            if hasattr(self, 'log_message'):
+                self.log_message(error_msg, level='error')
+            return None, error_msg
+            
+        logger.info(f"Starting {operation_func.__name__} on {module_name}")
+        result = operation_func(module, *args, **kwargs)
         logger.info(f"Successfully completed {operation_func.__name__}")
         return result, None
         
-    except TimeoutError as e:
-        error_msg = f"Timeout during {operation_func.__name__} on {device_name}: {e}"
-        logger.error(error_msg)
-        self.show_error_message(error_msg)
-        return None, error_msg
-        
-    except ConnectionError as e:
-        error_msg = f"Connection failed for {device_name}: {e}"
-        logger.error(error_msg)
-        self.show_error_message(error_msg)
-        return None, error_msg
-        
     except Exception as e:
-        error_msg = f"Unexpected error in {operation_func.__name__}: {e}"
+        error_msg = f"Error in {operation_func.__name__} on {module_name}: {e}"
         logger.error(error_msg, exc_info=True)
-        self.show_error_message(error_msg)
+        if hasattr(self, 'log_message'):
+            self.log_message(error_msg, level='error')
         return None, error_msg
 ```
 
-### Safety Interlocks
-**Pattern**: Parameter validation before operations
+### Safety Validation with v5 Patterns
+**Pattern**: Parameter and state validation before operations
 ```python
-def check_safety_limits(self, settings):
+def validate_measurement_settings(self):
+    """Validate settings before starting measurement"""
     violations = []
     
-    # Power limits
-    max_power = settings.child('hardware', 'safety', 'max_power').value()
-    if max_power > 90.0:
-        violations.append(f"Power limit too high: {max_power}% (max: 90%)")
+    # Check required modules are loaded
+    modules = self.get_required_modules()
+    required_modules = ['camera', 'rotators']
+    for module_name in required_modules:
+        if not modules.get(module_name):
+            violations.append(f"Required module '{module_name}' not loaded in dashboard")
     
-    # Timeout settings
-    movement_timeout = settings.child('hardware', 'safety', 'movement_timeout').value()
-    if movement_timeout > 60.0:
-        violations.append(f"Movement timeout too long: {movement_timeout}s")
-    
-    # ROI size validation
-    roi_width = settings.child('hardware', 'camera', 'roi', 'width').value()
-    roi_height = settings.child('hardware', 'camera', 'roi', 'height').value()
-    if roi_width * roi_height > 2048 * 2048:
-        violations.append(f"ROI too large: {roi_width}x{roi_height}")
+    # Parameter validation
+    if hasattr(self, 'settings'):
+        pol_steps = self.settings.child('experiment', 'pol_steps').value()
+        if pol_steps < 10:
+            violations.append(f"Too few polarization steps: {pol_steps} < 10")
+            
+        integration_time = self.settings.child('experiment', 'integration_time').value()
+        if integration_time > 10000:  # 10 seconds
+            violations.append(f"Integration time too long: {integration_time}ms")
     
     return violations
 ```
 
-## Testing Strategies
+## Configuration Management (v5)
 
-### Comprehensive Test Suite Structure
-**Pattern**: Multiple test levels with clear separation
-```python
-def run_comprehensive_tests():
-    tests = [
-        ("Extension Import and Initialization", test_extension_import),
-        ("Parameter Tree Structure", test_parameter_validation),
-        ("Device Manager Logic", test_device_manager),
-        ("Device Control Methods", test_device_controls),
-        ("Measurement Sequences", test_measurement_framework),
-        ("Configuration Management", test_config_save_load),
-        ("Analysis and Curve Fitting", test_analysis_functions),
-        ("Error Handling", test_error_cases)
-    ]
-    
-    passed = 0
-    for test_name, test_func in tests:
-        try:
-            if test_func():
-                passed += 1
-                print(f"✅ {test_name} PASSED")
-            else:
-                print(f"❌ {test_name} FAILED")
-        except Exception as e:
-            print(f"❌ {test_name} FAILED: {e}")
-    
-    return passed, len(tests)
+### v5-Compliant Configuration Files
+**Pattern**: Only use pyproject.toml for v5
+```toml
+# pyproject.toml (v5 standard - ONLY configuration file needed)
+[project]
+name = "pymodaq-plugins-yourpackage"
+version = "1.0.0"
+dependencies = [
+    "pymodaq>=5.0.0",
+    "pymodaq-gui",  
+    "pymodaq-data",
+    "pymodaq-utils",
+]
+
+[project.entry-points."pymodaq.move_plugins"]
+"DAQ_Move_YourDevice" = "package.daq_move_plugins.daq_move_YourDevice:DAQ_Move_YourDevice"
+
+[project.entry-points."pymodaq.viewer_plugins"]  
+"DAQ_2DViewer_YourCamera" = "package.daq_viewer_plugins.plugins_2D.daq_2Dviewer_YourCamera:DAQ_2DViewer_YourCamera"
+
+[project.entry-points."pymodaq.extensions"]
+"YourExtension" = "package.extensions.your_extension:YourExtension"
 ```
 
-### Mock-Based Testing  
-**Pattern**: Comprehensive mocking for hardware-independent testing
-```python
-class MockSettings:
-    def __init__(self, values_dict):
-        self.values = values_dict
-    
-    def child(self, *path):
-        return MockParameter(self.values.get('.'.join(path), 0))
+**CRITICAL v5 Configuration Rules**:
+- ❌ **NO** `plugin_info.toml` (obsolete in v5)
+- ✅ **USE** `pyproject.toml` exclusively
+- ✅ **SPECIFY** v5 modular dependencies
+- ✅ **CONFIGURE** proper entry points
 
-class MockParameter:
-    def __init__(self, value):
-        self._value = value
-    
-    def value(self):
-        return self._value
+## Key v5 Development Guidelines
 
-# Usage in tests
-mock_settings = MockSettings({
-    'experiment.pol_steps': 36,
-    'experiment.integration_time': 100.0,
-})
-```
+### PyMoDAQ v5 Standards Compliance (CRITICAL)
+1. **✅ USE**: `dashboard.modules_manager` for all hardware access
+2. **✅ USE**: v5 import paths (`pymodaq_gui`, `pymodaq_data`, `pymodaq_utils`)
+3. **✅ USE**: PyMoDAQ plugins exclusively for device communication  
+4. **✅ USE**: Standard CustomApp inheritance patterns
+5. **✅ USE**: DataWithAxes with `source=DataSource.raw`
+6. **❌ NEVER**: Create custom device managers (violates v5 standards)
+7. **❌ NEVER**: Use v4 import paths
+8. **❌ NEVER**: Access hardware directly bypassing PyMoDAQ plugins
 
-## Key Development Lessons
+### Extension Development Best Practices (v5)
+1. **Module Dependency**: Extensions depend on plugins being loaded in dashboard first
+2. **Error Handling**: Always check if required modules are available
+3. **Threading**: Use Qt threading patterns for non-blocking operations
+4. **Data Structures**: Follow PyMoDAQ v5 data structure requirements exactly
+5. **Configuration**: Use only `pyproject.toml` (no `plugin_info.toml`)
 
-### Critical Success Factors
-1. **PyMoDAQ Standards Compliance**: Following PyMoDAQ patterns exactly is essential
-2. **Threading Safety**: Proper Qt threading prevents crashes and ensures stability
-3. **Comprehensive Testing**: 8-level test suite catches issues before production
-4. **Device Abstraction**: Clean separation between plugins and hardware controllers
-5. **Configuration Management**: Professional configuration system enhances usability
+### Common v5 Migration Pitfalls to Avoid
+1. **Old Import Paths**: Using v4 import paths breaks functionality
+2. **Data Structure Paths**: `pymodaq_data.data` vs `pymodaq_data.datamodel` confusion
+3. **Configuration Files**: Keeping obsolete `plugin_info.toml`
+4. **Custom Device Managers**: These violate v5 standards and cause integration issues
+5. **Direct Hardware Access**: Always go through PyMoDAQ plugins
 
-### Common Pitfalls to Avoid
-1. **DataActuator Pattern Mixing**: Single vs multi-axis patterns are different!
-2. **Threading Violations**: Never update GUI directly from worker threads
-3. **Resource Leaks**: Always implement proper cleanup methods
-4. **Parameter Validation**: Validate all user inputs before operations
-5. **Error Handling**: Silent failures lead to user confusion and data loss
+### Success Factors for PyMoDAQ v5 Extensions
+1. **Standards First**: Follow PyMoDAQ v5 patterns exactly - no custom approaches
+2. **Plugin Integration**: Seamless integration with PyMoDAQ's plugin ecosystem
+3. **User Experience**: Standard PyMoDAQ workflow (load plugins, then launch extension)
+4. **Testing**: Comprehensive testing including PyMoDAQ integration validation
+5. **Import Compliance**: All imports use v5 paths
 
-### Performance Optimization Tips
-1. **Signal Batching**: Batch similar signals to reduce UI update frequency
-2. **Data Caching**: Cache expensive calculations and device queries
-3. **Lazy Loading**: Load complex components only when needed
-4. **Memory Management**: Clean up large data arrays promptly
-5. **Status Polling**: Use reasonable intervals for device status updates (5s recommended)
-
-This comprehensive pattern guide provides the foundation for developing professional-grade PyMoDAQ extensions that integrate seamlessly with the framework while providing advanced functionality for research applications.
+This guide provides PyMoDAQ v5 standards-compliant patterns for professional extension development that integrates seamlessly with the PyMoDAQ ecosystem while maintaining all framework benefits and standards compliance.
