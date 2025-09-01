@@ -36,12 +36,12 @@ def preset_file_path():
             <init>False</init>
             <params>
                 <main_settings>
-                    <DAQ_type>DAQ1D</DAQ_type>
-                    <detector_type>PyRPL_Scope</detector_type>
+                    <DAQ_type type="list">DAQ1D</DAQ_type>
+                    <detector_type type="list">PyRPL_Scope</detector_type>
                 </main_settings>
                 <detector_settings>
                     <connection>
-                        <mock_mode>True</mock_mode>
+                        <mock_mode type="bool">True</mock_mode>
                     </connection>
                 </detector_settings>
             </params>
@@ -53,11 +53,11 @@ def preset_file_path():
             <init>False</init>
             <params>
                 <main_settings>
-                    <move_type>PyRPL_PID</move_type>
+                    <move_type type="list">PyRPL_PID</move_type>
                 </main_settings>
                 <move_settings>
                     <connection_settings>
-                        <mock_mode>True</mock_mode>
+                        <mock_mode type="bool">True</mock_mode>
                     </connection_settings>
                 </move_settings>
             </params>
@@ -67,11 +67,11 @@ def preset_file_path():
             <init>False</init>
             <params>
                 <main_settings>
-                    <move_type>PyRPL_ASG</move_type>
+                    <move_type type="list">PyRPL_ASG</move_type>
                 </main_settings>
                 <move_settings>
                     <connection_settings>
-                        <mock_mode>True</mock_mode>
+                        <mock_mode type="bool">True</mock_mode>
                     </connection_settings>
                 </move_settings>
             </params>
@@ -96,7 +96,7 @@ def test_dashboard_loading(app, qtbot, preset_file_path):
     win.setWindowTitle("PyMoDAQ Dashboard")
 
     dashboard = DashBoard(area)
-    dashboard.show()
+    win.show()
     qtbot.addWidget(win)
 
     dashboard.set_preset_mode(preset_file_path)

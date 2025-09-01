@@ -6,7 +6,7 @@ This module provides comprehensive testing for PyRPL plugin functionality includ
 - PyRPL wrapper connection tests (mock and real hardware)
 - DAQ_Move_PyRPL_PID plugin functionality tests
 - DAQ_0DViewer_PyRPL plugin functionality tests
-- PIDModelPyrpl integration tests
+- PIDModelPyRPL integration tests
 - Error handling and edge case tests
 - Thread safety and performance validation
 
@@ -62,7 +62,7 @@ from pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID import DAQ_Move_P
 from pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_0D.daq_0Dviewer_PyRPL import (
     DAQ_0DViewer_PyRPL, MockPyRPLConnection
 )
-from pymodaq_plugins_pyrpl.models.PIDModelPyrpl import PIDModelPyrpl
+from pymodaq_plugins_pyrpl.models.PIDModelPyRPL import PIDModelPyRPL
 
 # PyMoDAQ imports for data structures
 from pymodaq_utils.utils import ThreadCommand
@@ -145,7 +145,8 @@ class MockPyrpl:
         self.hostname = hostname
         self.port = port
         self.timeout = timeout
-        self.redpitaya = MockRedPitaya()
+        self.rp = MockRedPitaya()  # PyRPL uses 'rp' not 'redpitaya'
+        self.redpitaya = self.rp  # Keep both for compatibility
         self._closed = False
     
     def close(self):
@@ -197,9 +198,10 @@ def pyrpl_manager():
 @pytest.fixture
 def mock_move_plugin():
     """Create a mock move plugin instance."""
-    with patch('pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID.PyRPLManager'):
+    with patch('pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID.PyRPLManager'), \
+         patch('pymodaq_plugins_pyrpl.utils.config.PyRPLConfig') as mock_config_class:
+        mock_config_class.return_value = Mock()
         plugin = DAQ_Move_PyRPL_PID()
-        plugin.ini_attributes()
         return plugin
 
 @pytest.fixture
@@ -233,12 +235,13 @@ class TestPyRPLWrapperMock:
         assert mock_pid_config.output_channel == OutputChannel.OUT1
         assert mock_pid_config.enabled is True
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pyrpl_connection_success(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pyrpl_connection_success(self, mock_pyrpl_module, mock_connection_info):
         """Test successful PyRPL connection establishment."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
         
         # Create connection and test
         connection = PyRPLConnection(mock_connection_info)
@@ -251,11 +254,12 @@ class TestPyRPLWrapperMock:
         assert connection.is_connected is True
         assert connection.pyrpl is mock_pyrpl_instance
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pyrpl_connection_failure(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pyrpl_connection_failure(self, mock_pyrpl_module, mock_connection_info):
         """Test PyRPL connection failure handling."""
         # Setup mock to raise exception
-        mock_pyrpl_class.side_effect = Exception("Connection failed")
+        mock_pyrpl_module.Pyrpl = Mock(side_effect=Exception("Connection failed"))
         
         # Create connection and test failure
         connection = PyRPLConnection(mock_connection_info)
@@ -266,16 +270,17 @@ class TestPyRPLWrapperMock:
         assert connection.last_error == "Connection failed"
         assert connection.is_connected is False
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pyrpl_connection_retry_logic(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pyrpl_connection_retry_logic(self, mock_pyrpl_module, mock_connection_info):
         """Test connection retry logic with eventual success."""
         # Setup mock to fail twice, then succeed
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.side_effect = [
+        mock_pyrpl_module.Pyrpl = Mock(side_effect = [
             Exception("First attempt failed"),
             Exception("Second attempt failed"),
             mock_pyrpl_instance  # Third attempt succeeds
-        ]
+        ])
         
         # Ensure we have enough retry attempts and reduce delay for testing
         mock_connection_info.retry_attempts = 3
@@ -286,14 +291,15 @@ class TestPyRPLWrapperMock:
         
         assert success is True
         assert connection.state == ConnectionState.CONNECTED
-        assert mock_pyrpl_class.call_count == 3
+        assert mock_pyrpl_module.Pyrpl.call_count == 3
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pid_module_access(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pid_module_access(self, mock_pyrpl_module, mock_connection_info):
         """Test PID module access and caching."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -306,12 +312,13 @@ class TestPyRPLWrapperMock:
         pid0_cached = connection.get_pid_module(PIDChannel.PID0)
         assert pid0_cached is pid0
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pid_configuration(self, mock_pyrpl_class, mock_connection_info, mock_pid_config):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pid_configuration(self, mock_pyrpl_module, mock_connection_info, mock_pid_config):
         """Test PID controller configuration."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -328,12 +335,13 @@ class TestPyRPLWrapperMock:
         assert pid_module.input == mock_pid_config.input_channel.value
         assert pid_module.output_direct == mock_pid_config.output_channel.value
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_voltage_reading(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_voltage_reading(self, mock_pyrpl_module, mock_connection_info):
         """Test voltage reading from input channels."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -345,12 +353,13 @@ class TestPyRPLWrapperMock:
         assert voltage1 == MOCK_DEFAULT_VOLTAGE_IN1
         assert voltage2 == MOCK_DEFAULT_VOLTAGE_IN2
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_multiple_voltage_reading(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_multiple_voltage_reading(self, mock_pyrpl_module, mock_connection_info):
         """Test reading multiple voltage channels simultaneously."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -371,12 +380,13 @@ class TestPyRPLWrapperMock:
         assert manager1 is manager2
         assert PyRPLManager.get_instance() is manager1
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_manager_connection_pooling(self, mock_pyrpl_class, pyrpl_manager):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_manager_connection_pooling(self, mock_pyrpl_module, pyrpl_manager):
         """Test connection pooling in PyRPL manager."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         # Request same connection twice
         conn1 = pyrpl_manager.get_connection(TEST_HOSTNAME, "test_config")
@@ -384,11 +394,12 @@ class TestPyRPLWrapperMock:
         
         assert conn1 is conn2  # Should be same instance (pooled)
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_manager_different_configs(self, mock_pyrpl_class, pyrpl_manager):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_manager_different_configs(self, mock_pyrpl_module, pyrpl_manager):
         """Test manager handling of different configurations."""
         # Setup mock
-        mock_pyrpl_class.return_value = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value = MockPyrpl())
         
         # Request connections with different configs
         conn1 = pyrpl_manager.get_connection(TEST_HOSTNAME, "config1")
@@ -401,10 +412,11 @@ class TestPyRPLWrapperMock:
 class TestPyRPLWrapperThreadSafety:
     """Test thread safety of PyRPL wrapper operations."""
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_concurrent_connections(self, mock_pyrpl_class, pyrpl_manager):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_concurrent_connections(self, mock_pyrpl_module, pyrpl_manager):
         """Test concurrent connection establishment."""
-        mock_pyrpl_class.return_value = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value = MockPyrpl())
         
         results = []
         threads = []
@@ -430,12 +442,13 @@ class TestPyRPLWrapperThreadSafety:
         assert all(results)
         assert len(results) == 5
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_concurrent_pid_operations(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_concurrent_pid_operations(self, mock_pyrpl_module, mock_connection_info):
         """Test concurrent PID operations on same connection."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -470,12 +483,13 @@ class TestPyRPLWrapperThreadSafety:
 class TestPyRPLWrapperErrorHandling:
     """Test error handling and recovery in PyRPL wrapper."""
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_connection_loss_detection(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_connection_loss_detection(self, mock_pyrpl_module, mock_connection_info):
         """Test detection of lost connections."""
         # Setup mock that initially works
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -485,8 +499,9 @@ class TestPyRPLWrapperErrorHandling:
         connection._redpitaya = None
         assert not connection.is_connected
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_operation_without_connection(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_operation_without_connection(self, mock_pyrpl_module, mock_connection_info):
         """Test operations when not connected."""
         connection = PyRPLConnection(mock_connection_info)
         # Don't connect
@@ -497,8 +512,9 @@ class TestPyRPLWrapperErrorHandling:
         assert connection.set_pid_setpoint(PIDChannel.PID0, 0.5) is False
         assert connection.configure_pid(PIDChannel.PID0, PIDConfiguration()) is False
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pid_operation_failures(self, mock_pyrpl_class, mock_connection_info):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pid_operation_failures(self, mock_pyrpl_module, mock_connection_info):
         """Test PID operation failure handling."""
         # Setup mock that raises exceptions
         mock_pyrpl_instance = MockPyrpl()
@@ -508,7 +524,7 @@ class TestPyRPLWrapperErrorHandling:
         type(failing_pid_module).setpoint = PropertyMock(side_effect=Exception("Hardware error"))
         mock_pyrpl_instance.redpitaya.pid0 = failing_pid_module
         
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection = PyRPLConnection(mock_connection_info)
         connection.connect()
@@ -538,7 +554,7 @@ class TestDAQMovePyRPLPID:
         """Test plugin parameter structure and defaults."""
         # Check connection parameters
         assert mock_move_plugin.settings.child('connection_settings', 'redpitaya_host').value() == 'rp-f08d6c.local'
-        assert mock_move_plugin.settings.child('connection_settings', 'config_name').value() == 'pymodaq'
+        assert mock_move_plugin.settings.child('connection_settings', 'config_name').value() == 'pymodaq_pyrpl'
         assert mock_move_plugin.settings.child('connection_settings', 'mock_mode').value() is False
         
         # Check PID configuration parameters
@@ -814,63 +830,87 @@ class TestDAQ0DViewerPyRPL:
 
 
 # ============================================================================
-# PIDModelPyrpl Integration Tests
+# PIDModelPyRPL Integration Tests
 # ============================================================================
 
 @pytest.mark.mock
-class TestPIDModelPyrpl:
-    """Test PIDModelPyrpl integration functionality."""
+class TestPIDModelPyRPL:
+    """Test PIDModelPyRPL integration functionality."""
 
-    @patch('pymodaq_plugins_pyrpl.models.PIDModelPyrpl.connect_redpitaya')
-    def test_pid_model_initialization(self, mock_connect):
+    def test_pid_model_initialization(self):
         """Test PID model initialization."""
-        # Setup mock connection
-        mock_connection = Mock()
-        mock_connection.is_connected = True
-        mock_connect.return_value = mock_connection
+        # Setup mock PyRPL instance
+        mock_pyrpl_instance = Mock()
+        mock_pid = Mock()
+        mock_pyrpl_instance.rp.pid0 = mock_pid
         
-        # Create mock PID controller
+        # Create mock extension
+        mock_extension = Mock()
+        mock_extension.get_pyrpl_instance.return_value = mock_pyrpl_instance
+        
+        # Create mock PID controller with dashboard
         mock_pid_controller = Mock()
-        mock_pid_controller.emit_status = Mock()
+        mock_pid_controller.dashboard.get_extension.return_value = mock_extension
+        mock_pid_controller.status_sig.emit = Mock()
         
         # Initialize model
-        model = PIDModelPyrpl(mock_pid_controller)
+        model = PIDModelPyRPL(mock_pid_controller)
         model.settings = Mock()
-        model.settings.child.return_value.value.return_value = TEST_HOSTNAME
+        model.settings.child.return_value.value.return_value = 0  # pid_channel = 0
+        model.update_settings = Mock()
         
         model.ini_model()
         
-        assert model.pyrpl_connection is mock_connection
-        mock_connect.assert_called_once()
+        assert model.pyrpl_instance is mock_pyrpl_instance
+        assert model.pid is mock_pid
+        mock_pid_controller.dashboard.get_extension.assert_called_once_with('PyRPL')
 
-    @patch('pymodaq_plugins_pyrpl.models.PIDModelPyrpl.connect_redpitaya')
-    def test_pid_model_parameter_updates(self, mock_connect):
+    def test_pid_model_parameter_updates(self):
         """Test PID model parameter update handling."""
-        # Setup mock connection
-        mock_connection = Mock()
-        mock_connection.is_connected = True
-        mock_connect.return_value = mock_connection
-        
         mock_pid_controller = Mock()
-        model = PIDModelPyrpl(mock_pid_controller)
-        model.pyrpl_connection = mock_connection
+        model = PIDModelPyRPL(mock_pid_controller)
         model.settings = Mock()
         
         # Create mock parameter
         mock_param = Mock()
-        mock_param.name.return_value = 'redpitaya_host'
-        mock_param.value.return_value = TEST_IP
+        mock_param.name.return_value = 'kp'
+        
+        # Create mock PID
+        mock_pid = Mock()
+        model.pid = mock_pid
+        
+        # Setup mock settings chain for PID constants
+        kp_setting = Mock()
+        kp_setting.value.return_value = 0.5
+        ki_setting = Mock()
+        ki_setting.value.return_value = 0.1  
+        kd_setting = Mock()
+        kd_setting.value.return_value = 0.05
+        
+        def child_side_effect(*args):
+            path = '/'.join(args)
+            if path == 'main_settings/pid_controls/kp':
+                return kp_setting
+            elif path == 'main_settings/pid_controls/ki':
+                return ki_setting
+            elif path == 'main_settings/pid_controls/kd':
+                return kd_setting
+            return Mock()
+        
+        model.settings.child.side_effect = child_side_effect
         
         # Test parameter update
         model.update_settings(mock_param)
         
-        # Should trigger reconnection for hostname change
-        mock_connect.assert_called()
+        # Verify PID parameters were set
+        assert mock_pid.kp == 0.5
+        assert mock_pid.ki == 0.1
+        assert mock_pid.kd == 0.05
 
     def test_pid_model_constants_and_limits(self):
         """Test PID model configuration constants."""
         mock_pid_controller = Mock()
-        model = PIDModelPyrpl(mock_pid_controller)
+        model = PIDModelPyRPL(mock_pid_controller)
         
         # Check limits
         assert model.limits['max']['value'] == 1
@@ -889,18 +929,21 @@ class TestPIDModelPyrpl:
     def test_pid_model_parameters_structure(self):
         """Test PID model parameter structure."""
         mock_pid_controller = Mock()
-        model = PIDModelPyrpl(mock_pid_controller)
+        model = PIDModelPyRPL(mock_pid_controller)
         
         param_names = [param['name'] for param in model.params]
         
-        expected_params = [
-            'redpitaya_host', 'input_channel', 'output_channel',
-            'pid_channel', 'use_hardware_pid', 'p_gain', 'i_gain',
-            'd_gain', 'voltage_limit_min', 'voltage_limit_max'
-        ]
+        # Check for the actual parameters structure
+        assert 'pyrpl_settings' in param_names
         
-        for expected_param in expected_params:
-            assert expected_param in param_names
+        # Check the pyrpl_settings group children
+        pyrpl_settings = next(param for param in model.params if param['name'] == 'pyrpl_settings')
+        child_names = [child['name'] for child in pyrpl_settings['children']]
+        
+        expected_children = ['pid_channel', 'pyrpl_input', 'pyrpl_output']
+        
+        for expected_child in expected_children:
+            assert expected_child in child_names
 
 
 # ============================================================================
@@ -911,12 +954,13 @@ class TestPIDModelPyrpl:
 class TestPluginIntegration:
     """Test integration between different plugin components."""
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_move_viewer_shared_connection(self, mock_pyrpl_class):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_move_viewer_shared_connection(self, mock_pyrpl_module):
         """Test shared connection between Move and Viewer plugins."""
         # Setup mock PyRPL
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         # Create manager and establish connection
         manager = PyRPLManager()
@@ -932,12 +976,13 @@ class TestPluginIntegration:
         assert conn1 is conn2
         assert conn1 is connection
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_pid_setpoint_monitoring_integration(self, mock_pyrpl_class):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_pid_setpoint_monitoring_integration(self, mock_pyrpl_module):
         """Test PID setpoint changes are reflected in monitoring."""
         # Setup mock PyRPL
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         # Create connection
         connection_info = ConnectionInfo(hostname=TEST_HOSTNAME)
@@ -1005,12 +1050,13 @@ class TestPluginIntegration:
 class TestPerformance:
     """Test performance characteristics of PyRPL plugin operations."""
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_voltage_reading_performance(self, mock_pyrpl_class):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_voltage_reading_performance(self, mock_pyrpl_module):
         """Test voltage reading performance."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection_info = ConnectionInfo(hostname=TEST_HOSTNAME)
         connection = PyRPLConnection(connection_info)
@@ -1030,12 +1076,13 @@ class TestPerformance:
         # Should be very fast for mock operations
         assert avg_time < 0.001  # Less than 1ms per reading
 
-    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl.Pyrpl')
-    def test_setpoint_change_performance(self, mock_pyrpl_class):
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_setpoint_change_performance(self, mock_pyrpl_module):
         """Test PID setpoint change performance."""
         # Setup mock
         mock_pyrpl_instance = MockPyrpl()
-        mock_pyrpl_class.return_value = mock_pyrpl_instance
+        mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
         connection_info = ConnectionInfo(hostname=TEST_HOSTNAME)
         connection = PyRPLConnection(connection_info)
@@ -1191,7 +1238,7 @@ def test_suite_coverage():
         "PyRPL wrapper connection management",
         "DAQ_Move_PyRPL_PID plugin functionality", 
         "DAQ_0DViewer_PyRPL plugin functionality",
-        "PIDModelPyrpl integration",
+        "PIDModelPyRPL integration",
         "Thread safety validation",
         "Error handling and recovery",
         "Performance characteristics",
@@ -1203,7 +1250,7 @@ def test_suite_coverage():
         "mock": len([m for m in dir(TestPyRPLWrapperMock) if m.startswith('test_')]) +
                len([m for m in dir(TestDAQMovePyRPLPID) if m.startswith('test_')]) +
                len([m for m in dir(TestDAQ0DViewerPyRPL) if m.startswith('test_')]) +
-               len([m for m in dir(TestPIDModelPyrpl) if m.startswith('test_')]),
+               len([m for m in dir(TestPIDModelPyRPL) if m.startswith('test_')]),
         "thread_safety": len([m for m in dir(TestPyRPLWrapperThreadSafety) if m.startswith('test_')]),
         "error_handling": len([m for m in dir(TestPyRPLWrapperErrorHandling) if m.startswith('test_')]),
         "integration": len([m for m in dir(TestPluginIntegration) if m.startswith('test_')]),

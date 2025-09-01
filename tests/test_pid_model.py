@@ -37,41 +37,56 @@ class TestPIDModelPyRPL(unittest.TestCase):
         self.assertEqual(self.pid_model.pid, self.mock_pyrpl.rp.pid0)
 
     def test_update_settings(self):
-        self.pid_model.pid = Mock()
+        # Create a proper mock PID object with all necessary attributes
+        pid_mock = Mock()
+        pid_mock.kp = 0.0
+        pid_mock.ki = 0.0
+        pid_mock.kd = 0.0
+        pid_mock.setpoint = 0.0
+        pid_mock.input = 'in1'
+        pid_mock.output_direct = 'out1'
+        self.pid_model.pid = pid_mock
 
-        # Mock the settings
-        mock_kp = Mock(value=lambda: 0.5)
-        mock_ki = Mock(value=lambda: 0.1)
-        mock_kd = Mock(value=lambda: 0.01)
-        mock_setpoint = Mock(value=lambda: 1.0)
-        mock_input = Mock(value=lambda: 'in2')
-        mock_output = Mock(value=lambda: 'out2')
+        # Mock the settings structure to return expected values
+        def mock_child(*args):
+            path = '/'.join(args)
+            if path == 'main_settings/pid_controls/kp':
+                return Mock(value=lambda: 0.5)
+            elif path == 'main_settings/pid_controls/ki':
+                return Mock(value=lambda: 0.1)
+            elif path == 'main_settings/pid_controls/kd':
+                return Mock(value=lambda: 0.01)
+            elif path == 'main_settings/setpoints/setpoint':
+                return Mock(value=lambda: 1.0)
+            else:
+                return Mock(value=lambda: None)
+        
+        self.pid_model.settings.child = mock_child
 
-        self.pid_model.settings.child.side_effect = [
-            mock_kp, mock_ki, mock_kd, # for kp, ki, kd
-            mock_setpoint, # for setpoint
-            mock_input, # for pyrpl_input
-            mock_output, # for pyrpl_output
-        ]
-
-        # Test updating pid constants
-        param_kp = Mock(name=lambda: 'kp')
+        # Test updating PID constants
+        param_kp = Mock()
+        param_kp.name.return_value = 'kp'
         self.pid_model.update_settings(param_kp)
         self.assertEqual(self.pid_model.pid.kp, 0.5)
         self.assertEqual(self.pid_model.pid.ki, 0.1)
         self.assertEqual(self.pid_model.pid.kd, 0.01)
 
         # Test updating setpoint
-        param_setpoint = Mock(name=lambda: 'setpoint')
+        param_setpoint = Mock()
+        param_setpoint.name.return_value = 'setpoint'
         self.pid_model.update_settings(param_setpoint)
         self.assertEqual(self.pid_model.pid.setpoint, 1.0)
 
         # Test updating input/output
-        param_input = Mock(name=lambda: 'pyrpl_input')
+        param_input = Mock()
+        param_input.name.return_value = 'pyrpl_input'
+        param_input.value.return_value = 'in2'
         self.pid_model.update_settings(param_input)
         self.assertEqual(self.pid_model.pid.input, 'in2')
 
-        param_output = Mock(name=lambda: 'pyrpl_output')
+        param_output = Mock()
+        param_output.name.return_value = 'pyrpl_output'
+        param_output.value.return_value = 'out2'
         self.pid_model.update_settings(param_output)
         self.assertEqual(self.pid_model.pid.output_direct, 'out2')
 
@@ -85,7 +100,7 @@ class TestPIDModelPyRPL(unittest.TestCase):
 
         self.assertIsInstance(data, DataToExport)
         self.assertEqual(data.name, 'pid_input')
-        np.testing.assert_array_equal(data.data[0].data, np.array([0.5]))
+        np.testing.assert_array_equal(data.data[0].data[0], np.array([0.5]))
 
 if __name__ == '__main__':
     unittest.main()

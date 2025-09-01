@@ -98,6 +98,11 @@ class PyRPLConfig(BaseConfig):
     
     config_name = 'pymodaq_plugins_pyrpl'
     
+    @property
+    def config_template_path(self):
+        """Path to the configuration template file"""
+        return Path(__file__).parent.joinpath('resources/config_template.toml')
+    
     def __init__(self, config_path: Optional[Path] = None):
         """
         Initialize PyRPL configuration.
@@ -105,6 +110,9 @@ class PyRPLConfig(BaseConfig):
         Parameters:
             config_path: Optional custom path for config files
         """
+        # Initialize with the config path if provided
+        if config_path is not None:
+            self._config_path = config_path
         super().__init__()
         
         # Use PyMoDAQ's standard config path if not specified

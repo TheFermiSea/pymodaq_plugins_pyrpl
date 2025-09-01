@@ -1,3 +1,4 @@
+
 <preset>
     <detectors>
         <det00>
@@ -5,12 +6,12 @@
             <init>False</init>
             <params>
                 <main_settings>
-                    <DAQ_type>DAQ1D</DAQ_type>
-                    <detector_type>PyRPL_Scope</detector_type>
+                    <DAQ_type type="list">DAQ1D</DAQ_type>
+                    <detector_type type="list">PyRPL_Scope</detector_type>
                 </main_settings>
                 <detector_settings>
                     <connection>
-                        <mock_mode>True</mock_mode>
+                        <mock_mode type="bool">True</mock_mode>
                     </connection>
                 </detector_settings>
             </params>
@@ -22,14 +23,28 @@
             <init>False</init>
             <params>
                 <main_settings>
-                    <move_type>PyRPL_PID</move_type>
+                    <move_type type="list">PyRPL_PID</move_type>
                 </main_settings>
                 <move_settings>
                     <connection_settings>
-                        <mock_mode>True</mock_mode>
+                        <mock_mode type="bool">True</mock_mode>
                     </connection_settings>
                 </move_settings>
             </params>
         </move00>
+        <move01>
+            <name>PyRPL_ASG</name>
+            <init>False</init>
+            <params>
+                <main_settings>
+                    <move_type type="list">PyRPL_ASG</move_type>
+                </main_settings>
+                <move_settings>
+                    <connection_settings>
+                        <mock_mode type="bool">True</mock_mode>
+                    </connection_settings>
+                </move_settings>
+            </params>
+        </move01>
     </actuators>
 </preset>

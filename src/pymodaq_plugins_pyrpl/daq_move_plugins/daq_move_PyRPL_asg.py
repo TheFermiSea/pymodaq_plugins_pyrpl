@@ -74,7 +74,7 @@ class DAQ_Move_PyRPL_asg(DAQ_Move_base):
                 self.asg.output_direct = param.value()
 
     def ini_stage(self, controller=None):
-        self.status.update(edict=self.settings.odict)
+        self.status.update(edict=self.settings.saveState())
         if self.settings.child('multiaxes', 'ismultiaxes').value():
             self.is_multiaxes = True
             self.axes_names = self.settings.child('multiaxes', 'multi_axes_names').value()
@@ -93,12 +93,23 @@ class DAQ_Move_PyRPL_asg(DAQ_Move_base):
             else:
                 self.asg = self.pyrpl_instance.rp.asgs.pop('pymodaq_asg1')
             self.commit_settings(self.settings)
-            self.status.update(message="Connected to RedPitaya.", edict=self.settings.odict)
+            self.status.update(message="Connected to RedPitaya.", edict=self.settings.saveState())
         except Exception as e:
             logger.exception(str(e))
-            self.status.update(message=f"Could not get PyRPL instance: {e}", edict=self.settings.odict)
+            self.status.update(message=f"Could not get PyRPL instance: {e}", edict=self.settings.saveState())
             return False
         return True
+
+    def ini_attributes(self):
+        """Initialize plugin attributes"""
+        self.asg = None
+        self.pyrpl_instance = None
+
+    def stop_motion(self):
+        """Stop ASG output"""
+        if self.asg is not None:
+            self.asg.output_direct = 'off'
+            logger.info("ASG output stopped")
 
     def close(self):
         if self.asg is not None:

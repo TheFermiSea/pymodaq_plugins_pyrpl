@@ -34,9 +34,14 @@ class TestPyRPLExtension(unittest.TestCase):
         self.assertIn('PID', self.extension.docks)
 
     def test_connect_to_redpitaya(self):
-        self.extension.settings.child.return_value.value.return_value = '192.168.1.100'
-        self.extension.connect_to_redpitaya()
-        self.mock_pyrpl.Pyrpl.assert_called_with(hostname='192.168.1.100')
+        # Mock the settings parameter structure properly
+        mock_hostname_param = Mock()
+        mock_hostname_param.value.return_value = '192.168.1.100'
+        
+        # Mock the child method to return our mock parameter
+        with patch.object(self.extension.settings, 'child', return_value=mock_hostname_param):
+            self.extension.connect_to_redpitaya()
+            self.mock_pyrpl.Pyrpl.assert_called_with(hostname='192.168.1.100')
 
     def test_launch_buttons(self):
         # This is a bit tricky to test without a full UI,

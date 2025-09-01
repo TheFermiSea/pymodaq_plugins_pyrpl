@@ -37,7 +37,7 @@ class DAQ_1DViewer_PyRPL_sa(DAQ_Viewer_base):
                 self.sa.trace_averages = param.value()
 
     def ini_detector(self, controller=None):
-        self.status.update(edict=self.settings.odict)
+        self.status.update(edict=self.settings.saveState())
 
         try:
             pyrpl_ext = self.dashboard.get_extension('PyRPL')
@@ -49,10 +49,10 @@ class DAQ_1DViewer_PyRPL_sa(DAQ_Viewer_base):
 
             self.sa = self.pyrpl_instance.spectrumanalyzer
             self.commit_settings(self.settings)
-            self.status.update(message="Connected to RedPitaya.", edict=self.settings.odict)
+            self.status.update(message="Connected to RedPitaya.", edict=self.settings.saveState())
         except Exception as e:
             logger.exception(str(e))
-            self.status.update(message=f"Could not get PyRPL instance: {e}", edict=self.settings.odict)
+            self.status.update(message=f"Could not get PyRPL instance: {e}", edict=self.settings.saveState())
             return False
         return True
 

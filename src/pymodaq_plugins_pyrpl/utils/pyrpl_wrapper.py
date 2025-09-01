@@ -20,6 +20,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+
+# Set up logger early
+logger = logging.getLogger(__name__)
 try:
     # Python 3.10+ compatibility fix for collections.Mapping
     import collections.abc
@@ -346,6 +349,14 @@ class PyRPLConnection:
             if status_callback:
                 status_callback(ThreadCommand('Update_Status', 
                     [f"Connecting to Red Pitaya at {self.hostname}", 'log']))
+
+            # Check if PyRPL is available
+            if not PYRPL_AVAILABLE or pyrpl is None:
+                error_msg = "PyRPL is not available - cannot establish connection"
+                logger.error(error_msg)
+                self.state = ConnectionState.ERROR
+                self.last_error = error_msg
+                return False
 
             for attempt in range(self.retry_attempts):
                 try:
