@@ -1,6 +1,3 @@
-pymodaq_plugins_pyrpl
-#####################
-
 
 PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
 
