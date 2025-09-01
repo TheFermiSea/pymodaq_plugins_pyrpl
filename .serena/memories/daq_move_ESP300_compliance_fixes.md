@@ -1,0 +1,1 @@
+The `daq_move_ESP300.py` plugin was updated to be compliant with PyMoDAQ 5.x standards. The `get_actuator_value` method was modified to return a list of numpy arrays instead of a `DataActuator` object. The creation of `DataActuator` objects within the plugin was removed, as this is handled by the framework.

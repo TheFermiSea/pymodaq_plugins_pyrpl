@@ -1,0 +1,1 @@
+When developing PyMoDAQ plugins, be mindful of the case sensitivity of attributes. For example, the plugin's title is stored in `self._title`, not `self.title`. A typo can lead to an `AttributeError`.

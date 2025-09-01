@@ -1,0 +1,1 @@
+The `daq_move_MaiTai.py` plugin was updated to include an empty `move_home` method. This ensures that the plugin fully adheres to the `DAQ_Move_base` interface, even though homing is not applicable to a laser's wavelength.

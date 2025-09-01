@@ -1,4 +1,4 @@
-[features]  # defines the plugin features contained into this plugin
+[features] # defines the plugin features contained into this plugin
 instruments = true  # true if plugin contains instrument classes (else false, notice the lowercase for toml files)
 extensions = true  # true if plugins contains dashboard extensions
 models = true  # true if plugins contains pid models
@@ -25,12 +25,32 @@ maintainers = [
     {name = "Jules", email = "jules@auto.dev"},
     #todo: list here all maintainers of your plugin
 ]
+=======
+extensions = true   # true if plugins contains dashboard extensions
+models = true       # true if plugins contains pid models
+h5exporters = false # true if plugin contains custom h5 file exporters
+scanners = false    # true if plugin contains custom scan layout (daq_scan extensions)
+
+[urls]
+package-url = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl' #todo modify url by your plugin url
+
+[project]
+name = "pymodaq_plugins_pyrpl" #todo modify template by your plugin short name
+description = 'A PyMoDAQ plugin for the Red Pitaya, using the PyRPL library.'
+dependencies = [
+    "pymodaq>=5.0.0",
+    "pyrpl",
+    #todo: list here all dependencies your package may have
+]
+
+authors = [{ name = "Brian Squires", email = "brian.squires@unt.edu" }]
+maintainers = [{ name = "Brian Squires", email = "brian.squires@unt.edu" }]
 
 # nottodo: leave everything below as is!
 
 dynamic = ["version", "urls", "entry-points"]
 readme = "README.rst"
-license = { file="LICENSE" }
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
 
 classifiers = [
@@ -50,15 +70,10 @@ classifiers = [
 ]
 
 [build-system]
-requires = [
-    "hatchling>=1.9.0",
-    "hatch-vcs", "toml",
-    "pymodaq_utils>=0.0.6",
-]
-build-backend = "hatchling.build"
+requires = ["hatchling>=1.9.0", "hatch-vcs", "toml", "pymodaq_utils>=0.0.6"]
+build-backend = "hachling.build"
 
 [tool.hatch.metadata.hooks.custom]
 
 [tool.hatch.version]
 source = "vcs"
-
