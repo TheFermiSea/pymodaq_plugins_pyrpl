@@ -3,7 +3,8 @@ from unittest.mock import Mock, patch, MagicMock
 
 import numpy as np
 from pymodaq.control_modules.viewer_utility_classes import DAQ_Viewer_base
-from pymodaq_data.data import DataFromPlugins, Axis
+from pymodaq.utils.data import DataFromPlugins
+from pymodaq_data.data import Axis
 
 class TestDAQ_1DViewer_PyRPL_sa(unittest.TestCase):
     def setUp(self):
@@ -21,13 +22,30 @@ class TestDAQ_1DViewer_PyRPL_sa(unittest.TestCase):
         self.assertIsInstance(self.plugin, DAQ_Viewer_base)
 
     def test_ini_detector(self):
-        self.plugin.settings.child.side_effect = [
-            Mock(value=lambda: 'Master'),
-            Mock(value=lambda: '192.168.1.100'),
-        ]
+        # Mock the PyRPL spectrum analyzer
+        mock_sa = Mock()
+        self.mock_pyrpl.spectrumanalyzer = mock_sa
+        
+        # Mock the dashboard and extension
+        mock_dashboard = Mock()
+        mock_extension = Mock()
+        mock_extension.get_pyrpl_instance.return_value = self.mock_pyrpl
+        mock_dashboard.get_extension.return_value = mock_extension
+        self.plugin.dashboard = mock_dashboard
+        
+        # Mock commit_settings method
+        self.plugin.commit_settings = Mock()
+        
+        # Mock the settings structure properly
+        with patch.object(self.plugin.settings, 'child') as mock_child:
+            mock_child.side_effect = [
+                Mock(value=lambda: 'Master'),
+                Mock(value=lambda: '192.168.1.100'),
+            ]
 
-        self.assertTrue(self.plugin.ini_detector())
-        self.mock_pyrpl.Pyrpl.assert_called_with(hostname='192.168.1.100')
+            self.assertTrue(self.plugin.ini_detector())
+            mock_dashboard.get_extension.assert_called_with('PyRPL')
+            self.assertEqual(self.plugin.sa, mock_sa)
 
     def test_grab_data(self):
         self.plugin.sa = Mock()

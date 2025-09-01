@@ -90,8 +90,8 @@ class PyRPLExtension(CustomExt):
         self.add_action('disconnect', 'Disconnect', 'disconnect', "Disconnect from RedPitaya")
 
     def connect_things(self):
-        self.settings.child('connection', 'connect').sigActivated.connect(self.connect_to_redpitaya)
-        self.settings.child('connection', 'disconnect').sigActivated.connect(self.disconnect_from_redpitaya)
+        self.settings.child('connection', 'connect').sigValueChanged.connect(self.connect_to_redpitaya)
+        self.settings.child('connection', 'disconnect').sigValueChanged.connect(self.disconnect_from_redpitaya)
 
     def value_changed(self, param):
         pass

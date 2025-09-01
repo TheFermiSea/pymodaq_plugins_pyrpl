@@ -39,16 +39,16 @@ from pymodaq.control_modules.move_utility_classes import (
 )
 
 from pymodaq_utils.utils import ThreadCommand
-from ..utils.config import get_pyrpl_config
-from ..utils.threading import ThreadedHardwareManager, threaded_hardware_operation
+# PyRPL configuration and threading handled by pyrpl_wrapper
 from pymodaq_gui.parameter import Parameter
 import logging
 
-# Import PyRPL wrapper utilities
+# Import PyRPL wrapper utilities and config
 from ..utils.pyrpl_wrapper import (
     PyRPLManager, PyRPLConnection, PIDChannel, InputChannel, 
     OutputChannel, PIDConfiguration, ConnectionState
 )
+from ..utils.config import get_pyrpl_config
 
 logger = logging.getLogger(__name__)
 
@@ -191,11 +191,7 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
         # Configuration management
         self.config = get_pyrpl_config()
         
-        # Threading support
-        self.hardware_manager = ThreadedHardwareManager(
-            max_workers=2, 
-            status_callback=self.emit_status
-        )
+        # Threading support handled by PyRPL wrapper
         
         # Connection state
         self.hostname: str = ''
