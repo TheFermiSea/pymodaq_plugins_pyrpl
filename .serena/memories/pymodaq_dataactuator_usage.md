@@ -1,0 +1,1 @@
+In PyMoDAQ 5.x, the `get_actuator_value` method in a move plugin should return a raw list of numpy arrays (e.g., `[np.array([pos1, pos2, ...])]`). The PyMoDAQ framework is responsible for wrapping this data in a `DataActuator` object. When updating the internal `current_position` attribute of the plugin, it should be assigned a `DataActuator` object.
