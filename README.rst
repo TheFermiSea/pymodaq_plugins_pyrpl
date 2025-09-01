@@ -1,5 +1,6 @@
 pymodaq_plugins_pyrpl
-####################
+#####################
+
 
 PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
 
@@ -11,17 +12,27 @@ PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
    :target: https://pymodaq.readthedocs.io/en/stable/?badge=latest
    :alt: Documentation Status
 
-.. image:: https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/workflows/Upload%20Python%20Package/badge.svg
-   :target: https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl
+.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/workflows/Upload%20Python%20Package/badge.svg
+   :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl
    :alt: Publication Status
 
-.. image:: https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
-    :target: https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
+.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
+    :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
+=======
+.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/workflows/Upload%20Python%20Package/badge.svg
+   :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl
+   :alt: Publication Status
+
+.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
+    :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
 
 This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ for advanced measurement and control applications. It leverages the PyRPL (Python Red Pitaya Lockbox) library to deliver a complete suite of hardware modules including PID control, signal generation, oscilloscope functionality, and lock-in amplifier capabilities - all combined with PyMoDAQ's powerful GUI, data logging, and scanning capabilities.
 
+This plugin is intended to recreate the PyRPL package in PyMoDAQ as a plugin.
+=======
 Key Features
 ============
+
 
 * **Complete Hardware Suite**: Full Red Pitaya module integration (PID, ASG, Scope, IQ, voltage monitoring)
 * **Hardware-Accelerated Performance**: FPGA-based processing for microsecond-level response times
@@ -146,6 +157,8 @@ Requirements
 Dependencies
 ++++++++++++
 
+
+=======
 The plugin automatically installs required dependencies:
 
 * ``pyrpl``: PyRPL library for Red Pitaya communication
