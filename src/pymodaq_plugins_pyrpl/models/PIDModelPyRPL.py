@@ -1,7 +1,6 @@
 import numpy as np
 from pymodaq.extensions.pid.utils import PIDModelGeneric, DataToActuatorPID
 from pymodaq_data.data import DataToExport, DataCalculated
-from pymodaq_data.data import DataActuator
 from typing import List
 from pymodaq_utils.logger import set_logger, get_module_name
 
