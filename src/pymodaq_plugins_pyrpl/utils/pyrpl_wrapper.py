@@ -40,25 +40,25 @@ try:
         collections.Sized = collections.abc.Sized
         collections.Callable = collections.abc.Callable
         collections.Hashable = collections.abc.Hashable
-    
+
     # NumPy 1.20+ compatibility fix for np.complex
     if not hasattr(np, 'complex'):
         np.complex = complex
         np.complex_ = complex
-    
-    # Qt timer compatibility fix - patch before importing pyrpl 
+
+    # Qt timer compatibility fix - patch before importing pyrpl
     try:
         from qtpy.QtCore import QTimer
         original_setInterval = QTimer.setInterval
-        
+
         def setInterval_patched(self, msec):
             """Patched setInterval to handle float inputs properly."""
             return original_setInterval(self, int(msec))
-        
+
         QTimer.setInterval = setInterval_patched
     except ImportError:
         pass  # Qt not available, skip timer patch
-    
+
     import pyrpl
     PYRPL_AVAILABLE = True
     from pyrpl.hardware_modules.pid import Pid as PidModule
@@ -68,13 +68,13 @@ except (ImportError, TypeError, AttributeError) as e:
     PYRPL_AVAILABLE = False
     pyrpl = None
     PidModule = object  # Mock for when PyRPL is not available
-    
+
     # Create a mock Pyrpl class for type hints when PyRPL is not available
     class _MockPyrpl:
         pass
     pyrpl = type('MockPyrplModule', (), {'Pyrpl': _MockPyrpl})()
 
-from pymodaq.utils.daq_utils import ThreadCommand
+from pymodaq_utils.utils import ThreadCommand
 
 
 logger = logging.getLogger(__name__)
@@ -258,10 +258,10 @@ class ConnectionInfo:
 class PyRPLConnection:
     """
     Manages a single Red Pitaya connection with thread-safe operations.
-    
+
     This class handles the connection lifecycle, PID module management,
     and provides safe access to hardware resources.
-    
+
     Attributes:
         hostname (str): Red Pitaya hostname or IP address
         config_name (str): PyRPL configuration name
@@ -276,35 +276,35 @@ class PyRPLConnection:
         self.connection_timeout = connection_info.connection_timeout
         self.retry_attempts = connection_info.retry_attempts
         self.retry_delay = connection_info.retry_delay
-        
+
         self.state = ConnectionState.DISCONNECTED
         self.last_error: Optional[str] = None
         self.connected_at: Optional[float] = None
-        
+
         # PyRPL objects
         self._pyrpl: Optional[pyrpl.Pyrpl] = None
         self._redpitaya: Optional[Any] = None
-        
+
         # Thread safety
         self._lock = threading.RLock()
         self._connection_lock = threading.Lock()
-        
+
         # PID modules tracking
         self._active_pids: Dict[PIDChannel, PidModule] = {}
         self._pid_configs: Dict[PIDChannel, PIDConfiguration] = {}
-        
+
         # ASG modules tracking
         self._active_asgs: Dict[ASGChannel, Any] = {}
         self._asg_configs: Dict[ASGChannel, ASGConfiguration] = {}
-        
+
         # IQ modules tracking
         self._active_iqs: Dict[IQChannel, Any] = {}
         self._iq_configs: Dict[IQChannel, IQConfiguration] = {}
-        
+
         # Scope module tracking
         self._scope_module: Optional[Any] = None
         self._scope_config: Optional[ScopeConfiguration] = None
-        
+
         # Reference counting for proper cleanup
         self._ref_count = 0
 
@@ -312,8 +312,8 @@ class PyRPLConnection:
     def is_connected(self) -> bool:
         """Check if the connection is active and healthy."""
         with self._lock:
-            return (self.state == ConnectionState.CONNECTED and 
-                    self._pyrpl is not None and 
+            return (self.state == ConnectionState.CONNECTED and
+                    self._pyrpl is not None and
                     self._redpitaya is not None)
 
     @property
@@ -331,10 +331,10 @@ class PyRPLConnection:
     def connect(self, status_callback: Optional[callable] = None) -> bool:
         """
         Establish connection to Red Pitaya.
-        
+
         Args:
             status_callback: Optional callback for status updates
-            
+
         Returns:
             bool: True if connection successful, False otherwise
         """
@@ -345,9 +345,9 @@ class PyRPLConnection:
 
             self.state = ConnectionState.CONNECTING
             self.last_error = None
-            
+
             if status_callback:
-                status_callback(ThreadCommand('Update_Status', 
+                status_callback(ThreadCommand('Update_Status',
                     [f"Connecting to Red Pitaya at {self.hostname}", 'log']))
 
             # Check if PyRPL is available
@@ -361,7 +361,7 @@ class PyRPLConnection:
             for attempt in range(self.retry_attempts):
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{self.retry_attempts} to {self.hostname}")
-                    
+
                     # Create PyRPL connection
                     self._pyrpl = pyrpl.Pyrpl(
                         config=self.config_name,
@@ -369,25 +369,25 @@ class PyRPLConnection:
                         port=self.port,
                         timeout=self.connection_timeout
                     )
-                    
+
                     self._redpitaya = self._pyrpl.rp
-                    
+
                     # Connection is successful if we reach this point
                     # Skip version check due to PyRPL compatibility issues
                     logger.debug(f"PyRPL connection established to {self.hostname}")
-                    
+
                     self.state = ConnectionState.CONNECTED
                     self.connected_at = time.time()
                     self.last_error = None
-                    
+
                     logger.info(f"Successfully connected to Red Pitaya {self.hostname}")
-                    
+
                     if status_callback:
-                        status_callback(ThreadCommand('Update_Status', 
+                        status_callback(ThreadCommand('Update_Status',
                             [f"Red Pitaya {self.hostname} connected", 'log']))
-                    
+
                     return True
-                    
+
                 except ZeroDivisionError as e:
                     # PyRPL sometimes has division by zero errors during module loading
                     # but the connection itself is successful, so ignore these
@@ -402,10 +402,10 @@ class PyRPLConnection:
                     error_msg = f"Connection attempt {attempt + 1} failed: {str(e)}"
                     logger.warning(error_msg)
                     self.last_error = str(e)
-                    
+
                     if attempt < self.retry_attempts - 1:
                         time.sleep(self.retry_delay)
-                    
+
                 except Exception as e:
                     # Check if this is a PyRPL-related error that we can ignore
                     error_str = str(e)
@@ -415,28 +415,28 @@ class PyRPLConnection:
                         self.connected_at = time.time()
                         self.last_error = None
                         return True
-                    
+
                     error_msg = f"Connection attempt {attempt + 1} failed: {error_str}"
                     logger.warning(error_msg)
                     self.last_error = error_str
-                    
+
                     if attempt < self.retry_attempts - 1:
                         time.sleep(self.retry_delay)
-                    
+
             # All attempts failed
             self.state = ConnectionState.ERROR
             error_msg = f"Failed to connect to {self.hostname} after {self.retry_attempts} attempts"
             logger.error(error_msg)
-            
+
             if status_callback:
                 status_callback(ThreadCommand('Update_Status', [error_msg, 'log']))
-            
+
             return False
 
     def disconnect(self, status_callback: Optional[callable] = None) -> None:
         """
         Safely disconnect from Red Pitaya.
-        
+
         Args:
             status_callback: Optional callback for status updates
         """
@@ -446,7 +446,7 @@ class PyRPLConnection:
 
             try:
                 if status_callback:
-                    status_callback(ThreadCommand('Update_Status', 
+                    status_callback(ThreadCommand('Update_Status',
                         [f"Disconnecting from {self.hostname}", 'log']))
 
                 # Safely disable all active PIDs, ASGs, IQs, and Scope
@@ -454,11 +454,11 @@ class PyRPLConnection:
                 self._disable_all_asgs()
                 self._disable_all_iqs()
                 self._disable_scope()
-                
+
                 # Close PyRPL connection
                 if self._pyrpl is not None:
                     self._pyrpl.close()
-                
+
                 self._pyrpl = None
                 self._redpitaya = None
                 self._active_pids.clear()
@@ -469,16 +469,16 @@ class PyRPLConnection:
                 self._iq_configs.clear()
                 self._scope_module = None
                 self._scope_config = None
-                
+
                 self.state = ConnectionState.DISCONNECTED
                 self.connected_at = None
-                
+
                 logger.info(f"Disconnected from Red Pitaya {self.hostname}")
-                
+
                 if status_callback:
-                    status_callback(ThreadCommand('Update_Status', 
+                    status_callback(ThreadCommand('Update_Status',
                         [f"Disconnected from {self.hostname}", 'log']))
-                        
+
             except Exception as e:
                 error_msg = f"Error during disconnect from {self.hostname}: {str(e)}"
                 logger.error(error_msg)
@@ -528,24 +528,24 @@ class PyRPLConnection:
     def get_pid_module(self, channel: PIDChannel) -> Optional[PidModule]:
         """
         Get a PID module for the specified channel.
-        
+
         Args:
             channel: PID channel to retrieve
-            
+
         Returns:
             PidModule or None if not available
         """
         with self._lock:
             if not self.is_connected:
                 return None
-                
+
             try:
                 if channel not in self._active_pids:
                     pid_module = getattr(self._redpitaya, channel.value)
                     self._active_pids[channel] = pid_module
-                    
+
                 return self._active_pids[channel]
-                
+
             except Exception as e:
                 logger.error(f"Failed to get PID module {channel.value}: {e}")
                 return None
@@ -553,11 +553,11 @@ class PyRPLConnection:
     def configure_pid(self, channel: PIDChannel, config: PIDConfiguration) -> bool:
         """
         Configure a PID controller with the specified parameters.
-        
+
         Args:
             channel: PID channel to configure
             config: PID configuration parameters
-            
+
         Returns:
             bool: True if configuration successful
         """
@@ -579,21 +579,21 @@ class PyRPLConnection:
                 pid_module.p = config.p_gain
                 pid_module.i = config.i_gain
                 pid_module.d = config.d_gain
-                
+
                 # Configure input/output routing
                 pid_module.input = config.input_channel.value
                 if config.enabled:
                     pid_module.output_direct = config.output_channel.value
                 else:
                     pid_module.output_direct = 'off'
-                
+
                 # Set voltage limits
                 pid_module.max_voltage = config.voltage_limit_max
                 pid_module.min_voltage = config.voltage_limit_min
-                
+
                 logger.debug(f"Configured PID {channel.value} with setpoint {config.setpoint}")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to configure PID {channel.value}: {e}")
                 return False
@@ -601,11 +601,11 @@ class PyRPLConnection:
     def set_pid_setpoint(self, channel: PIDChannel, setpoint: float) -> bool:
         """
         Set the setpoint for a PID controller.
-        
+
         Args:
             channel: PID channel
             setpoint: New setpoint value
-            
+
         Returns:
             bool: True if successful
         """
@@ -619,13 +619,13 @@ class PyRPLConnection:
                     return False
 
                 pid_module.setpoint = setpoint
-                
+
                 # Update stored configuration
                 if channel in self._pid_configs:
                     self._pid_configs[channel].setpoint = setpoint
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to set setpoint for PID {channel.value}: {e}")
                 return False
@@ -633,10 +633,10 @@ class PyRPLConnection:
     def get_pid_setpoint(self, channel: PIDChannel) -> Optional[float]:
         """
         Get the current setpoint for a PID controller.
-        
+
         Args:
             channel: PID channel
-            
+
         Returns:
             Current setpoint or None if error
         """
@@ -650,7 +650,7 @@ class PyRPLConnection:
                     return None
 
                 return pid_module.setpoint
-                
+
             except Exception as e:
                 logger.error(f"Failed to get setpoint for PID {channel.value}: {e}")
                 return None
@@ -658,10 +658,10 @@ class PyRPLConnection:
     def enable_pid(self, channel: PIDChannel) -> bool:
         """
         Enable a PID controller.
-        
+
         Args:
             channel: PID channel to enable
-            
+
         Returns:
             bool: True if successful
         """
@@ -677,10 +677,10 @@ class PyRPLConnection:
                 config = self._pid_configs[channel]
                 pid_module.output_direct = config.output_channel.value
                 config.enabled = True
-                
+
                 logger.debug(f"Enabled PID {channel.value}")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to enable PID {channel.value}: {e}")
                 return False
@@ -688,10 +688,10 @@ class PyRPLConnection:
     def disable_pid(self, channel: PIDChannel) -> bool:
         """
         Disable a PID controller.
-        
+
         Args:
             channel: PID channel to disable
-            
+
         Returns:
             bool: True if successful
         """
@@ -705,13 +705,13 @@ class PyRPLConnection:
                     return False
 
                 pid_module.output_direct = 'off'
-                
+
                 if channel in self._pid_configs:
                     self._pid_configs[channel].enabled = False
-                
+
                 logger.debug(f"Disabled PID {channel.value}")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to disable PID {channel.value}: {e}")
                 return False
@@ -719,10 +719,10 @@ class PyRPLConnection:
     def read_voltage(self, channel: InputChannel) -> Optional[float]:
         """
         Read voltage from an input channel.
-        
+
         Args:
             channel: Input channel to read
-            
+
         Returns:
             Voltage value or None if error
         """
@@ -738,15 +738,15 @@ class PyRPLConnection:
                         return scope.voltage_in1
                     elif channel == InputChannel.IN2:
                         return scope.voltage_in2
-                
+
                 # Fallback to sampler if scope not available
                 if hasattr(self._redpitaya, 'sampler'):
                     sampler = self._redpitaya.sampler
                     return getattr(sampler, channel.value)
-                
+
                 logger.warning("Neither scope nor sampler available for voltage reading")
                 return None
-                
+
             except Exception as e:
                 logger.error(f"Failed to read voltage from {channel.value}: {e}")
                 return None
@@ -754,24 +754,24 @@ class PyRPLConnection:
     def get_asg_module(self, channel: ASGChannel) -> Optional[Any]:
         """
         Get an ASG module for the specified channel.
-        
+
         Args:
             channel: ASG channel to retrieve
-            
+
         Returns:
             ASG module or None if not available
         """
         with self._lock:
             if not self.is_connected:
                 return None
-                
+
             try:
                 if channel not in self._active_asgs:
                     asg_module = getattr(self._redpitaya, channel.value)
                     self._active_asgs[channel] = asg_module
-                    
+
                 return self._active_asgs[channel]
-                
+
             except Exception as e:
                 logger.error(f"Failed to get ASG module {channel.value}: {e}")
                 return None
@@ -779,11 +779,11 @@ class PyRPLConnection:
     def configure_asg(self, channel: ASGChannel, config: ASGConfiguration) -> bool:
         """
         Configure an ASG with the specified parameters.
-        
+
         Args:
             channel: ASG channel to configure
             config: ASG configuration parameters
-            
+
         Returns:
             bool: True if configuration successful
         """
@@ -805,22 +805,22 @@ class PyRPLConnection:
                 asg_module.amplitude = config.amplitude
                 asg_module.offset = config.offset
                 asg_module.phase = config.phase
-                
+
                 # Set waveform
                 asg_module.waveform = config.waveform.value
-                
+
                 # Configure trigger
                 asg_module.trigger_source = config.trigger_source.value
-                
+
                 # Enable/disable output
                 if config.output_enable:
                     asg_module.output_direct = f'out{channel.value[-1]}'  # out1 or out2
                 else:
                     asg_module.output_direct = 'off'
-                
+
                 logger.debug(f"Configured ASG {channel.value} with frequency {config.frequency} Hz")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to configure ASG {channel.value}: {e}")
                 return False
@@ -828,11 +828,11 @@ class PyRPLConnection:
     def set_asg_frequency(self, channel: ASGChannel, frequency: float) -> bool:
         """
         Set the frequency for an ASG.
-        
+
         Args:
             channel: ASG channel
             frequency: New frequency value in Hz
-            
+
         Returns:
             bool: True if successful
         """
@@ -846,13 +846,13 @@ class PyRPLConnection:
                     return False
 
                 asg_module.frequency = frequency
-                
+
                 # Update stored configuration
                 if channel in self._asg_configs:
                     self._asg_configs[channel].frequency = frequency
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to set frequency for ASG {channel.value}: {e}")
                 return False
@@ -860,10 +860,10 @@ class PyRPLConnection:
     def get_asg_frequency(self, channel: ASGChannel) -> Optional[float]:
         """
         Get the current frequency for an ASG.
-        
+
         Args:
             channel: ASG channel
-            
+
         Returns:
             Current frequency in Hz or None if error
         """
@@ -877,7 +877,7 @@ class PyRPLConnection:
                     return None
 
                 return asg_module.frequency
-                
+
             except Exception as e:
                 logger.error(f"Failed to get frequency for ASG {channel.value}: {e}")
                 return None
@@ -885,11 +885,11 @@ class PyRPLConnection:
     def set_asg_amplitude(self, channel: ASGChannel, amplitude: float) -> bool:
         """
         Set the amplitude for an ASG.
-        
+
         Args:
             channel: ASG channel
             amplitude: New amplitude value in V
-            
+
         Returns:
             bool: True if successful
         """
@@ -903,13 +903,13 @@ class PyRPLConnection:
                     return False
 
                 asg_module.amplitude = amplitude
-                
+
                 # Update stored configuration
                 if channel in self._asg_configs:
                     self._asg_configs[channel].amplitude = amplitude
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to set amplitude for ASG {channel.value}: {e}")
                 return False
@@ -917,11 +917,11 @@ class PyRPLConnection:
     def enable_asg_output(self, channel: ASGChannel, enable: bool) -> bool:
         """
         Enable or disable ASG output.
-        
+
         Args:
             channel: ASG channel
             enable: True to enable, False to disable output
-            
+
         Returns:
             bool: True if successful
         """
@@ -938,14 +938,14 @@ class PyRPLConnection:
                     asg_module.output_direct = f'out{channel.value[-1]}'  # out1 or out2
                 else:
                     asg_module.output_direct = 'off'
-                
+
                 # Update stored configuration
                 if channel in self._asg_configs:
                     self._asg_configs[channel].output_enable = enable
-                
+
                 logger.debug(f"{'Enabled' if enable else 'Disabled'} ASG {channel.value} output")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to {'enable' if enable else 'disable'} ASG {channel.value}: {e}")
                 return False
@@ -953,20 +953,20 @@ class PyRPLConnection:
     def get_scope_module(self) -> Optional[Any]:
         """
         Get the scope module for oscilloscope functionality.
-        
+
         Returns:
             Scope module or None if not available
         """
         with self._lock:
             if not self.is_connected:
                 return None
-                
+
             try:
                 if self._scope_module is None:
                     self._scope_module = self._redpitaya.scope
-                    
+
                 return self._scope_module
-                
+
             except Exception as e:
                 logger.error(f"Failed to get scope module: {e}")
                 return None
@@ -974,10 +974,10 @@ class PyRPLConnection:
     def configure_scope(self, config: ScopeConfiguration) -> bool:
         """
         Configure the scope with the specified parameters.
-        
+
         Args:
             config: Scope configuration parameters
-            
+
         Returns:
             bool: True if configuration successful
         """
@@ -1001,13 +1001,13 @@ class PyRPLConnection:
                 scope.trigger_level = config.trigger_level
                 scope.average = config.average
                 scope.rolling_mode = config.rolling_mode
-                
+
                 # Set input channel
                 scope.input = config.input_channel.value
-                
+
                 logger.debug(f"Configured scope with decimation {config.decimation.value}")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to configure scope: {e}")
                 return False
@@ -1015,10 +1015,10 @@ class PyRPLConnection:
     def acquire_scope_data(self, timeout: Optional[float] = None) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
         Acquire data from the scope.
-        
+
         Args:
             timeout: Optional timeout in seconds (uses config timeout if None)
-            
+
         Returns:
             Tuple of (time_axis, voltage_data) or None if error
         """
@@ -1037,30 +1037,30 @@ class PyRPLConnection:
 
                 # Use config timeout if not specified
                 acq_timeout = timeout if timeout is not None else self._scope_config.timeout
-                
+
                 # Start acquisition
                 start_time = time.time()
                 scope.trigger()
-                
+
                 # Wait for acquisition to complete
                 while not scope.stopped():
                     if time.time() - start_time > acq_timeout:
                         logger.error(f"Scope acquisition timeout ({acq_timeout}s)")
                         return None
                     time.sleep(0.001)  # 1ms polling interval
-                
+
                 # Get data
                 voltage_data = scope.curve()
-                
+
                 # Generate time axis
                 sampling_time = scope.sampling_time
                 duration = scope.duration
                 data_length = len(voltage_data)
                 time_axis = np.linspace(0, duration, data_length)
-                
+
                 logger.debug(f"Acquired {len(voltage_data)} scope samples")
                 return time_axis, voltage_data
-                
+
             except Exception as e:
                 logger.error(f"Failed to acquire scope data: {e}")
                 return None
@@ -1068,7 +1068,7 @@ class PyRPLConnection:
     def get_scope_sampling_time(self) -> Optional[float]:
         """
         Get the current scope sampling time.
-        
+
         Returns:
             Sampling time in seconds or None if error
         """
@@ -1080,9 +1080,9 @@ class PyRPLConnection:
                 scope = self.get_scope_module()
                 if scope is None:
                     return None
-                    
+
                 return scope.sampling_time
-                
+
             except Exception as e:
                 logger.error(f"Failed to get scope sampling time: {e}")
                 return None
@@ -1090,7 +1090,7 @@ class PyRPLConnection:
     def get_scope_duration(self) -> Optional[float]:
         """
         Get the current scope acquisition duration.
-        
+
         Returns:
             Duration in seconds or None if error
         """
@@ -1102,9 +1102,9 @@ class PyRPLConnection:
                 scope = self.get_scope_module()
                 if scope is None:
                     return None
-                    
+
                 return scope.duration
-                
+
             except Exception as e:
                 logger.error(f"Failed to get scope duration: {e}")
                 return None
@@ -1112,7 +1112,7 @@ class PyRPLConnection:
     def start_scope_acquisition(self) -> bool:
         """
         Start scope acquisition (trigger).
-        
+
         Returns:
             bool: True if successful
         """
@@ -1127,7 +1127,7 @@ class PyRPLConnection:
 
                 scope.trigger()
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to start scope acquisition: {e}")
                 return False
@@ -1135,7 +1135,7 @@ class PyRPLConnection:
     def stop_scope_acquisition(self) -> bool:
         """
         Stop scope acquisition.
-        
+
         Returns:
             bool: True if successful
         """
@@ -1150,7 +1150,7 @@ class PyRPLConnection:
 
                 scope.stop()
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to stop scope acquisition: {e}")
                 return False
@@ -1158,7 +1158,7 @@ class PyRPLConnection:
     def is_scope_running(self) -> Optional[bool]:
         """
         Check if scope acquisition is running.
-        
+
         Returns:
             True if running, False if stopped, None if error
         """
@@ -1172,7 +1172,7 @@ class PyRPLConnection:
                     return None
 
                 return not scope.stopped()
-                
+
             except Exception as e:
                 logger.error(f"Failed to check scope status: {e}")
                 return None
@@ -1180,24 +1180,24 @@ class PyRPLConnection:
     def get_iq_module(self, channel: IQChannel) -> Optional[Any]:
         """
         Get an IQ module for the specified channel.
-        
+
         Args:
             channel: IQ channel to retrieve
-            
+
         Returns:
             IQ module or None if not available
         """
         with self._lock:
             if not self.is_connected:
                 return None
-                
+
             try:
                 if channel not in self._active_iqs:
                     iq_module = getattr(self._redpitaya, channel.value)
                     self._active_iqs[channel] = iq_module
-                    
+
                 return self._active_iqs[channel]
-                
+
             except Exception as e:
                 logger.error(f"Failed to get IQ module {channel.value}: {e}")
                 return None
@@ -1205,11 +1205,11 @@ class PyRPLConnection:
     def configure_iq(self, channel: IQChannel, config: IQConfiguration) -> bool:
         """
         Configure an IQ lock-in amplifier with the specified parameters.
-        
+
         Args:
             channel: IQ channel to configure
             config: IQ configuration parameters
-            
+
         Returns:
             bool: True if configuration successful
         """
@@ -1234,14 +1234,14 @@ class PyRPLConnection:
                 iq_module.gain = config.gain
                 iq_module.quadrature_factor = config.quadrature_factor
                 iq_module.amplitude = config.amplitude
-                
+
                 # Configure input/output routing
                 iq_module.input = config.input_channel.value
                 iq_module.output_direct = config.output_direct.value
-                
+
                 logger.debug(f"Configured IQ {channel.value} with frequency {config.frequency} Hz")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to configure IQ {channel.value}: {e}")
                 return False
@@ -1249,10 +1249,10 @@ class PyRPLConnection:
     def get_iq_measurement(self, channel: IQChannel) -> Optional[Tuple[float, float]]:
         """
         Get I and Q measurements from the lock-in amplifier.
-        
+
         Args:
             channel: IQ channel to read from
-            
+
         Returns:
             Tuple of (I, Q) values or None if error
         """
@@ -1268,9 +1268,9 @@ class PyRPLConnection:
                 # Get I and Q values from the IQ module
                 i_value = iq_module.I
                 q_value = iq_module.Q
-                
+
                 return i_value, q_value
-                
+
             except Exception as e:
                 logger.error(f"Failed to get IQ measurement for {channel.value}: {e}")
                 return None
@@ -1278,11 +1278,11 @@ class PyRPLConnection:
     def calculate_magnitude_phase(self, i: float, q: float) -> Tuple[float, float]:
         """
         Calculate magnitude and phase from I and Q components.
-        
+
         Args:
             i: In-phase component
             q: Quadrature component
-            
+
         Returns:
             Tuple of (magnitude, phase_degrees)
         """
@@ -1294,11 +1294,11 @@ class PyRPLConnection:
     def set_iq_frequency(self, channel: IQChannel, frequency: float) -> bool:
         """
         Set the frequency for an IQ lock-in amplifier.
-        
+
         Args:
             channel: IQ channel
             frequency: New frequency value in Hz
-            
+
         Returns:
             bool: True if successful
         """
@@ -1312,13 +1312,13 @@ class PyRPLConnection:
                     return False
 
                 iq_module.frequency = frequency
-                
+
                 # Update stored configuration
                 if channel in self._iq_configs:
                     self._iq_configs[channel].frequency = frequency
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to set frequency for IQ {channel.value}: {e}")
                 return False
@@ -1326,10 +1326,10 @@ class PyRPLConnection:
     def get_iq_frequency(self, channel: IQChannel) -> Optional[float]:
         """
         Get the current frequency for an IQ lock-in amplifier.
-        
+
         Args:
             channel: IQ channel
-            
+
         Returns:
             Current frequency in Hz or None if error
         """
@@ -1343,7 +1343,7 @@ class PyRPLConnection:
                     return None
 
                 return iq_module.frequency
-                
+
             except Exception as e:
                 logger.error(f"Failed to get frequency for IQ {channel.value}: {e}")
                 return None
@@ -1351,11 +1351,11 @@ class PyRPLConnection:
     def set_iq_phase(self, channel: IQChannel, phase: float) -> bool:
         """
         Set the phase for an IQ lock-in amplifier.
-        
+
         Args:
             channel: IQ channel
             phase: New phase value in degrees
-            
+
         Returns:
             bool: True if successful
         """
@@ -1369,13 +1369,13 @@ class PyRPLConnection:
                     return False
 
                 iq_module.phase = phase
-                
+
                 # Update stored configuration
                 if channel in self._iq_configs:
                     self._iq_configs[channel].phase = phase
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to set phase for IQ {channel.value}: {e}")
                 return False
@@ -1383,11 +1383,11 @@ class PyRPLConnection:
     def enable_iq_output(self, channel: IQChannel, output_channel: IQOutputDirect) -> bool:
         """
         Enable IQ output to specified channel.
-        
+
         Args:
             channel: IQ channel
             output_channel: Output channel to enable
-            
+
         Returns:
             bool: True if successful
         """
@@ -1401,14 +1401,14 @@ class PyRPLConnection:
                     return False
 
                 iq_module.output_direct = output_channel.value
-                
+
                 # Update stored configuration
                 if channel in self._iq_configs:
                     self._iq_configs[channel].output_direct = output_channel
-                
+
                 logger.debug(f"Enabled IQ {channel.value} output to {output_channel.value}")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Failed to enable IQ {channel.value} output: {e}")
                 return False
@@ -1416,10 +1416,10 @@ class PyRPLConnection:
     def read_multiple_voltages(self, channels: List[InputChannel]) -> Dict[InputChannel, Optional[float]]:
         """
         Read voltages from multiple input channels simultaneously.
-        
+
         Args:
             channels: List of input channels to read
-            
+
         Returns:
             Dictionary mapping channels to voltage values
         """
@@ -1431,7 +1431,7 @@ class PyRPLConnection:
     def get_connection_info(self) -> Dict[str, Any]:
         """
         Get detailed connection information.
-        
+
         Returns:
             Dictionary with connection details
         """
@@ -1453,7 +1453,7 @@ class PyRPLConnection:
     def acquire_reference(self):
         """
         Context manager for reference counting.
-        
+
         Usage:
             with connection.acquire_reference():
                 # Use connection safely
@@ -1480,14 +1480,14 @@ class PyRPLConnection:
 class PyRPLManager:
     """
     Singleton manager for PyRPL connections.
-    
+
     Provides centralized connection pooling to prevent conflicts between
     multiple PyMoDAQ plugins accessing the same Red Pitaya devices.
     """
-    
+
     _instance: Optional['PyRPLManager'] = None
     _lock = threading.Lock()
-    
+
     def __new__(cls) -> 'PyRPLManager':
         """Singleton implementation."""
         if cls._instance is None:
@@ -1501,47 +1501,47 @@ class PyRPLManager:
         """Initialize the manager (called only once due to singleton)."""
         if self._initialized:
             return
-            
+
         self._connections: Dict[str, PyRPLConnection] = {}
         self._manager_lock = threading.RLock()
         self._initialized = True
-        
+
         logger.info("PyRPL Manager initialized")
 
-    def get_connection(self, hostname: str, config_name: str = "pymodaq", 
+    def get_connection(self, hostname: str, config_name: str = "pymodaq",
                       **connection_kwargs) -> Optional[PyRPLConnection]:
         """
         Get or create a connection to a Red Pitaya device.
-        
+
         Args:
             hostname: Red Pitaya hostname or IP address
             config_name: PyRPL configuration name
             **connection_kwargs: Additional connection parameters
-            
+
         Returns:
             PyRPLConnection instance or None if creation failed
         """
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
-            
+
             if connection_key in self._connections:
                 connection = self._connections[connection_key]
                 logger.debug(f"Returning existing connection to {hostname}")
                 return connection
-            
+
             # Create new connection
             connection_info = ConnectionInfo(
                 hostname=hostname,
                 config_name=config_name,
                 **connection_kwargs
             )
-            
+
             try:
                 connection = PyRPLConnection(connection_info)
                 self._connections[connection_key] = connection
                 logger.info(f"Created new connection to {hostname}")
                 return connection
-                
+
             except Exception as e:
                 logger.error(f"Failed to create connection to {hostname}: {e}")
                 return None
@@ -1551,21 +1551,21 @@ class PyRPLManager:
                       **connection_kwargs) -> Optional[PyRPLConnection]:
         """
         Connect to a Red Pitaya device.
-        
+
         Args:
             hostname: Red Pitaya hostname or IP address
             config_name: PyRPL configuration name
             status_callback: Optional callback for status updates
             **connection_kwargs: Additional connection parameters
-            
+
         Returns:
             Connected PyRPLConnection instance or None if failed
         """
         connection = self.get_connection(hostname, config_name, **connection_kwargs)
-        
+
         if connection is None:
             return None
-            
+
         if connection.connect(status_callback):
             return connection
         else:
@@ -1575,61 +1575,61 @@ class PyRPLManager:
                          status_callback: Optional[callable] = None) -> bool:
         """
         Disconnect from a Red Pitaya device.
-        
+
         Args:
             hostname: Red Pitaya hostname or IP address
             config_name: PyRPL configuration name
             status_callback: Optional callback for status updates
-            
+
         Returns:
             bool: True if successful
         """
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
-            
+
             if connection_key not in self._connections:
                 return True  # Already disconnected
-                
+
             connection = self._connections[connection_key]
-            
+
             # Check if connection is still in use
             if connection._ref_count > 0:
                 logger.warning(f"Connection {hostname} still has active references, disconnecting anyway")
-            
+
             connection.disconnect(status_callback)
             return True
 
     def remove_connection(self, hostname: str, config_name: str = "pymodaq") -> bool:
         """
         Remove a connection from the manager.
-        
+
         Args:
             hostname: Red Pitaya hostname or IP address
             config_name: PyRPL configuration name
-            
+
         Returns:
             bool: True if removed successfully
         """
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
-            
+
             if connection_key in self._connections:
                 connection = self._connections[connection_key]
-                
+
                 # Ensure connection is disconnected
                 if connection.is_connected:
                     connection.disconnect()
-                
+
                 del self._connections[connection_key]
                 logger.info(f"Removed connection to {hostname}")
                 return True
-                
+
             return False
 
     def get_all_connections(self) -> Dict[str, PyRPLConnection]:
         """
         Get all active connections.
-        
+
         Returns:
             Dictionary mapping connection keys to PyRPLConnection instances
         """
@@ -1639,7 +1639,7 @@ class PyRPLManager:
     def disconnect_all(self, status_callback: Optional[callable] = None) -> None:
         """
         Disconnect all active connections.
-        
+
         Args:
             status_callback: Optional callback for status updates
         """
@@ -1656,14 +1656,14 @@ class PyRPLManager:
         """
         logger.info("Cleaning up PyRPL Manager")
         self.disconnect_all()
-        
+
         with self._manager_lock:
             self._connections.clear()
 
     def get_manager_status(self) -> Dict[str, Any]:
         """
         Get detailed manager status.
-        
+
         Returns:
             Dictionary with manager status information
         """
@@ -1671,7 +1671,7 @@ class PyRPLManager:
             connections_info = {}
             for key, conn in self._connections.items():
                 connections_info[key] = conn.get_connection_info()
-                
+
             return {
                 'total_connections': len(self._connections),
                 'connections': connections_info
@@ -1694,16 +1694,16 @@ def connect_redpitaya(hostname: str, config_name: str = "pymodaq",
                      **kwargs) -> Optional[PyRPLConnection]:
     """
     Convenience function to connect to a Red Pitaya device.
-    
+
     Args:
         hostname: Red Pitaya hostname or IP address
         config_name: PyRPL configuration name
         status_callback: Optional callback for status updates
         **kwargs: Additional connection parameters
-        
+
     Returns:
         Connected PyRPLConnection instance or None if failed
-        
+
     Example:
         >>> connection = connect_redpitaya('rp-f08d6c.local')
         >>> if connection and connection.is_connected:
@@ -1718,12 +1718,12 @@ def disconnect_redpitaya(hostname: str, config_name: str = "pymodaq",
                         status_callback: Optional[callable] = None) -> bool:
     """
     Convenience function to disconnect from a Red Pitaya device.
-    
+
     Args:
         hostname: Red Pitaya hostname or IP address
         config_name: PyRPL configuration name
         status_callback: Optional callback for status updates
-        
+
     Returns:
         bool: True if successful
     """
@@ -1734,26 +1734,26 @@ def disconnect_redpitaya(hostname: str, config_name: str = "pymodaq",
 if __name__ == "__main__":
     # Example usage and testing
     import sys
-    
+
     logging.basicConfig(level=logging.DEBUG)
-    
+
     if len(sys.argv) < 2:
         print("Usage: python pyrpl_wrapper.py <hostname>")
         sys.exit(1)
-    
+
     hostname = sys.argv[1]
     print(f"Testing connection to {hostname}")
-    
+
     # Test connection
     connection = connect_redpitaya(hostname)
-    
+
     if connection and connection.is_connected:
         print("Connection successful!")
-        
+
         # Test voltage reading
         voltage = connection.read_voltage(InputChannel.IN1)
         print(f"Input 1 voltage: {voltage}V")
-        
+
         # Test PID configuration
         config = PIDConfiguration(
             setpoint=0.5,
@@ -1762,14 +1762,14 @@ if __name__ == "__main__":
             input_channel=InputChannel.IN1,
             output_channel=OutputChannel.OUT1
         )
-        
+
         success = connection.configure_pid(PIDChannel.PID0, config)
         print(f"PID configuration: {'Success' if success else 'Failed'}")
-        
+
         # Test cleanup
         disconnect_redpitaya(hostname)
         print("Disconnected successfully")
-        
+
     else:
         print("Connection failed!")
         if connection:
