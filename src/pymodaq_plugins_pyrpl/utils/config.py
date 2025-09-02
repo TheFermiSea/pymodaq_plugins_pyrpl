@@ -110,9 +110,10 @@ class PyRPLConfig(BaseConfig):
         Parameters:
             config_path: Optional custom path for config files
         """
-        # Initialize with the config path if provided
+        # Store config path without setting property
         if config_path is not None:
             self._config_path = config_path
+        
         super().__init__()
         
         # Use PyMoDAQ's standard config path if not specified
@@ -123,8 +124,8 @@ class PyRPLConfig(BaseConfig):
                 # Fallback to user home directory
                 config_path = Path.home() / '.pymodaq' / 'pyrpl_configs'
                 
-        self.config_path = Path(config_path)
-        self.config_path.mkdir(parents=True, exist_ok=True)
+        self._config_path = Path(config_path)
+        self._config_path.mkdir(parents=True, exist_ok=True)
         
         # Initialize with defaults
         self._config_data = DEFAULT_PYRPL_CONFIG.copy()
@@ -138,9 +139,13 @@ class PyRPLConfig(BaseConfig):
         """Get the full path to the configuration file."""
         return self.config_path / f"{self.config_name}.toml"
     
-    def load_config(self) -> bool:
+    def load_config(self, config_name=None, config_template_path=None) -> bool:
         """
         Load configuration from file.
+        
+        Args:
+            config_name: Optional config name (for compatibility with BaseConfig)
+            config_template_path: Optional template path (for compatibility with BaseConfig)
         
         Returns:
             True if configuration loaded successfully, False otherwise

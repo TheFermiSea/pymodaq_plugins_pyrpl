@@ -46,6 +46,15 @@ try:
         np.complex = complex
         np.complex_ = complex
 
+    # PyQTGraph compatibility fix - patch before importing pyrpl
+    try:
+        import pyqtgraph as pg
+        if not hasattr(pg, 'GraphicsWindow'):
+            # pyqtgraph 0.13+ removed GraphicsWindow, use GraphicsLayoutWidget instead
+            pg.GraphicsWindow = pg.GraphicsLayoutWidget
+    except ImportError:
+        pass  # pyqtgraph not available
+
     # Qt timer compatibility fix - patch before importing pyrpl
     try:
         from qtpy.QtCore import QTimer
@@ -59,20 +68,49 @@ try:
     except ImportError:
         pass  # Qt not available, skip timer patch
 
-    import pyrpl
-    PYRPL_AVAILABLE = True
-    from pyrpl.hardware_modules.pid import Pid as PidModule
+    # Don't import PyRPL at module level - use lazy loading
+    PYRPL_AVAILABLE = None  # Will be determined on first use
+    pyrpl = None
+    PidModule = object
+    
+    def _lazy_import_pyrpl():
+        """Lazy import PyRPL only when needed."""
+        global pyrpl, PidModule, PYRPL_AVAILABLE
+        
+        if PYRPL_AVAILABLE is not None:
+            return PYRPL_AVAILABLE
+            
+        try:
+            import pyrpl as pyrpl_module
+            from pyrpl.hardware_modules.pid import Pid as PidModule_imported
+            
+            pyrpl = pyrpl_module
+            PidModule = PidModule_imported
+            PYRPL_AVAILABLE = True
+            logger.info("PyRPL imported successfully via lazy loading")
+            return True
+            
+        except (ImportError, TypeError, AttributeError) as e:
+            logger.warning(f"PyRPL lazy import failed: {e}")
+            PYRPL_AVAILABLE = False
+            pyrpl = None
+            PidModule = object
+            
+            # Create a mock Pyrpl class
+            class _MockPyrpl:
+                pass
+            pyrpl = type('MockPyrplModule', (), {'Pyrpl': _MockPyrpl})()
+            return False
+
 except (ImportError, TypeError, AttributeError) as e:
-    # Handle PyRPL import issues (e.g., Qt compatibility problems)
-    logger.warning(f"PyRPL import failed: {e}")
+    # Handle any setup issues
+    logger.warning(f"PyRPL wrapper setup failed: {e}")
     PYRPL_AVAILABLE = False
     pyrpl = None
-    PidModule = object  # Mock for when PyRPL is not available
-
-    # Create a mock Pyrpl class for type hints when PyRPL is not available
-    class _MockPyrpl:
-        pass
-    pyrpl = type('MockPyrplModule', (), {'Pyrpl': _MockPyrpl})()
+    PidModule = object
+    
+    def _lazy_import_pyrpl():
+        return False
 
 from pymodaq_utils.utils import ThreadCommand
 
@@ -281,8 +319,8 @@ class PyRPLConnection:
         self.last_error: Optional[str] = None
         self.connected_at: Optional[float] = None
 
-        # PyRPL objects
-        self._pyrpl: Optional[pyrpl.Pyrpl] = None
+        # PyRPL objects (using Any to avoid import issues)
+        self._pyrpl: Optional[Any] = None
         self._redpitaya: Optional[Any] = None
 
         # Thread safety
@@ -317,7 +355,7 @@ class PyRPLConnection:
                     self._redpitaya is not None)
 
     @property
-    def pyrpl(self) -> Optional[pyrpl.Pyrpl]:
+    def pyrpl(self) -> Optional[Any]:
         """Get the PyRPL instance (thread-safe)."""
         with self._lock:
             return self._pyrpl
@@ -362,6 +400,10 @@ class PyRPLConnection:
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{self.retry_attempts} to {self.hostname}")
 
+                    # Import PyRPL lazily before using it
+                    if not _lazy_import_pyrpl():
+                        raise ImportError("PyRPL not available - lazy import failed")
+                    
                     # Create PyRPL connection
                     self._pyrpl = pyrpl.Pyrpl(
                         config=self.config_name,
