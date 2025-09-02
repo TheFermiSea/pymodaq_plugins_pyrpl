@@ -1,0 +1,136 @@
+## Plugin info file for pymodaq_plugins_pyrpl
+## This file is parsed by PyMoDAQ v5+ for plugin discovery and registration
+## All plugin entry points are explicitly defined here for proper integration
+
+[features] # defines the plugin features contained into this plugin
+instruments = false  # true if plugin contains instrument classes
+extensions = false   # true if plugins contains dashboard extensions  
+models = true        # true if plugins contains pid models
+h5exporters = false  # true if plugin contains custom h5 file exporters
+scanners = false     # true if plugin contains custom scan layout extensions
+
+[package]
+package-url = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl'
+plugin-name = "pymodaq_plugins_pyrpl"
+
+[urls]
+homepage = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl'
+documentation = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/blob/main/README.rst'
+repository = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl'
+changelog = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/releases'
+
+## Move Plugins (Actuator Controllers)
+## These plugins control hardware actuators (PID setpoints, signal generators)
+[entry-points.'pymodaq_plugins_actuators']
+daq_move_PyRPL_PID = "pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID"
+daq_move_PyRPL_ASG = "pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_ASG"
+
+## Viewer Plugins (Detectors)
+## 0D Plugins - Scalar measurements (voltage, IQ outputs)
+[entry-points.'pymodaq_plugins_0D']
+daq_0Dviewer_PyRPL = "pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_0D.daq_0Dviewer_PyRPL"
+daq_0Dviewer_PyRPL_IQ = "pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_0D.daq_0Dviewer_PyRPL_IQ"
+
+## 1D Plugins - Array measurements (oscilloscope traces)
+[entry-points.'pymodaq_plugins_1D']
+daq_1Dviewer_PyRPL_Scope = "pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_1D.daq_1Dviewer_PyRPL_Scope"
+
+## Models (PID Extensions)
+## Custom PID models for advanced control applications
+[entry-points.'pymodaq_plugins_models']
+PIDModelPyrpl = "pymodaq_plugins_pyrpl.models.PIDModelPyrpl"
+
+## Plugin-specific metadata for PyMoDAQ integration
+[plugin-info]
+author = "PyMoDAQ PyRPL Development Team"
+author-email = "pymodaq@univ-rouen.fr"
+description = "Complete PyRPL integration suite for Red Pitaya STEMlab devices in PyMoDAQ"
+long-description = """
+This plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ 
+through the PyRPL library. Features include PID control, arbitrary signal generation, 
+oscilloscope functionality, and lock-in amplifier capabilities for advanced measurement 
+and control applications.
+
+Supported hardware:
+- Red Pitaya STEMlab 125-10/125-14/122-16
+- PyRPL firmware and library
+
+Key features:
+- Real-time PID control (3 channels)
+- Arbitrary signal generation (2 channels)
+- High-speed oscilloscope (125 MS/s)
+- Lock-in amplifier detection (3 channels)
+- Voltage monitoring and measurement
+- Thread-safe operation and mock mode support
+"""
+license = "MIT"
+version = "1.0.0"
+python-requires = ">=3.8"
+dependencies = [
+    "pymodaq>=5.0.0",
+    "pyrpl>=0.9.5",
+    "numpy",
+    "pyqtgraph"
+]
+
+## Hardware requirements and compatibility
+[hardware]
+manufacturers = ["Red Pitaya"]
+models = [
+    "STEMlab 125-10",
+    "STEMlab 125-14", 
+    "STEMlab 122-16"
+]
+interfaces = ["Ethernet", "WiFi"]
+communication-protocols = ["TCP/IP", "PyRPL"]
+
+## Plugin capabilities matrix
+[capabilities]
+# Move/Actuator plugins
+actuators = [
+    {name = "PyRPL_PID", description = "PID controller setpoint control", units = "V", range = "±1V"},
+    {name = "PyRPL_ASG", description = "Arbitrary Signal Generator control", units = "V", range = "±1V"}
+]
+
+# Detector/Viewer plugins  
+detectors = [
+    {name = "PyRPL", description = "Basic voltage monitoring", dimension = "0D", units = "V"},
+    {name = "PyRPL_IQ", description = "Lock-in amplifier I/Q detection", dimension = "0D", units = "V"},
+    {name = "PyRPL_Scope", description = "Oscilloscope time-series acquisition", dimension = "1D", units = "V"}
+]
+
+# PID Models
+models = [
+    {name = "PIDModelPyrpl", description = "PyRPL-based PID controller model"}
+]
+
+## Configuration and setup information
+[setup]
+mock-mode = true  # Supports operation without hardware
+configuration-required = [
+    "redpitaya_host",  # Red Pitaya hostname or IP address
+    "connection_timeout"  # Network timeout settings
+]
+optional-dependencies = [
+    "matplotlib",  # For enhanced plotting capabilities
+    "scipy"        # For signal processing enhancements
+]
+
+## Testing and validation
+[testing]
+test-framework = "pytest"
+mock-support = true
+hardware-tests = true
+continuous-integration = true
+
+## Documentation and examples
+[documentation]
+readme = "README.rst"
+user-guide = "docs/"
+api-reference = "Complete docstring coverage"
+examples = [
+    "PID laser stabilization",
+    "Signal generation and measurement",
+    "Real-time oscilloscope monitoring", 
+    "Lock-in detection applications"
+]

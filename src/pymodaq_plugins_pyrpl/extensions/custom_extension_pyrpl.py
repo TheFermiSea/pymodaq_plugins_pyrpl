@@ -114,9 +114,9 @@ class PyRPLExtension(CustomExt):
             self.settings.child('connection', 'status').setValue('Disconnected')
 
 def main():
-    from pymodaq.utils.gui_utils.utils import mkQApp
-    from pymodaq.utils.gui_utils.loader_utils import load_dashboard_with_preset
-    from pymodaq.utils.messenger import messagebox
+    from pymodaq_gui.utils.utils import mkQApp
+    from pymodaq_gui.utils.loader_utils import load_dashboard_with_preset
+    from pymodaq_utils.messenger import messagebox
 
     app = mkQApp(EXTENSION_NAME)
     try:

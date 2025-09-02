@@ -8,7 +8,7 @@ frequency control for waveform generation in spectroscopy and test applications.
 
 Features:
     - Hardware ASG frequency control (Red Pitaya STEMlab)
-    - Dual-channel ASG support (ASG0/ASG1)  
+    - Dual-channel ASG support (ASG0/ASG1)
     - Multiple waveforms: sin, cos, ramp, square, noise, dc
     - Thread-safe PyRPL wrapper integration
     - Mock mode for development without hardware
@@ -29,7 +29,7 @@ Installation Requirements:
     - Red Pitaya network connection and PyRPL firmware
     - Proper network configuration (see documentation)
 
-Author: Claude Code
+Author: PyMoDAQ Plugin Development Team
 License: MIT
 """
 
@@ -63,7 +63,7 @@ def get_asg_parameters():
         connection_config = config.get_connection_config()
         hardware_config = config.get_hardware_config()
         asg_defaults = hardware_config.get('asg_defaults', {})
-        
+
         # Use config values with fallbacks
         default_hostname = connection_config.get('default_hostname', 'rp-f08d6c.local')
         default_timeout = connection_config.get('connection_timeout', 10.0)
@@ -71,7 +71,7 @@ def get_asg_parameters():
         default_frequency = asg_defaults.get('frequency', 1000.0)
         default_amplitude = asg_defaults.get('amplitude', 0.1)
         default_waveform = asg_defaults.get('waveform', 'sin')
-        
+
     except Exception as e:
         logger.warning(f"Failed to load config defaults: {e}, using hardcoded values")
         # Fallback to hardcoded defaults
@@ -81,48 +81,48 @@ def get_asg_parameters():
         default_frequency = 1000.0
         default_amplitude = 0.1
         default_waveform = 'sin'
-    
+
     return [
         {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
-            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str', 
+            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str',
              'value': default_hostname, 'tip': 'Red Pitaya hostname or IP address'},
-            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str', 
+            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str',
              'value': default_config_name, 'tip': 'PyRPL configuration name'},
-            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float', 
+            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float',
              'value': default_timeout, 'min': 1.0, 'max': 60.0},
             {'title': 'Mock Mode:', 'name': 'mock_mode', 'type': 'bool', 'value': False,
              'tip': 'Enable mock mode for testing without hardware'},
         ]},
-        
+
         {'title': 'ASG Configuration', 'name': 'asg_config', 'type': 'group', 'children': [
-            {'title': 'ASG Channel:', 'name': 'asg_channel', 'type': 'list', 
+            {'title': 'ASG Channel:', 'name': 'asg_channel', 'type': 'list',
              'limits': ['asg0', 'asg1'], 'value': 'asg0',
              'tip': 'Select ASG module (asg0 or asg1)'},
-            {'title': 'Waveform:', 'name': 'waveform', 'type': 'list', 
-             'limits': ['sin', 'cos', 'ramp', 'square', 'noise', 'dc'], 
+            {'title': 'Waveform:', 'name': 'waveform', 'type': 'list',
+             'limits': ['sin', 'cos', 'ramp', 'square', 'noise', 'dc'],
              'value': default_waveform, 'tip': 'ASG waveform type'},
         ]},
-        
+
         {'title': 'Signal Parameters', 'name': 'signal_params', 'type': 'group', 'children': [
-            {'title': 'Frequency (Hz):', 'name': 'frequency', 'type': 'float', 
-             'value': default_frequency, 'min': 0.1, 'max': 62.5e6, 
+            {'title': 'Frequency (Hz):', 'name': 'frequency', 'type': 'float',
+             'value': default_frequency, 'min': 0.1, 'max': 62.5e6,
              'tip': 'Signal frequency in Hz'},
-            {'title': 'Amplitude (V):', 'name': 'amplitude', 'type': 'float', 
+            {'title': 'Amplitude (V):', 'name': 'amplitude', 'type': 'float',
              'value': default_amplitude, 'min': 0.0, 'max': 1.0, 'step': 0.001,
              'tip': 'Signal amplitude (0-1V peak)'},
-            {'title': 'Offset (V):', 'name': 'offset', 'type': 'float', 
+            {'title': 'Offset (V):', 'name': 'offset', 'type': 'float',
              'value': 0.0, 'min': -1.0, 'max': 1.0, 'step': 0.001,
              'tip': 'DC offset voltage'},
         ]},
-        
+
         {'title': 'Safety Settings', 'name': 'safety_settings', 'type': 'group', 'children': [
-            {'title': 'Min Frequency (Hz):', 'name': 'min_frequency', 'type': 'float', 
+            {'title': 'Min Frequency (Hz):', 'name': 'min_frequency', 'type': 'float',
              'value': 0.1, 'min': 0.1, 'max': 1e6,
              'tip': 'Minimum allowed frequency'},
-            {'title': 'Max Frequency (Hz):', 'name': 'max_frequency', 'type': 'float', 
+            {'title': 'Max Frequency (Hz):', 'name': 'max_frequency', 'type': 'float',
              'value': 1e6, 'min': 1000.0, 'max': 62.5e6,
              'tip': 'Maximum allowed frequency'},
-            {'title': 'Enable ASG on Connect:', 'name': 'auto_enable_asg', 'type': 'bool', 
+            {'title': 'Enable ASG on Connect:', 'name': 'auto_enable_asg', 'type': 'bool',
              'value': False, 'tip': 'Automatically enable ASG output on connection'},
         ]},
     ]
@@ -131,17 +131,17 @@ def get_asg_parameters():
 class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     """
     PyMoDAQ Actuator Plugin for Red Pitaya ASG Frequency Control.
-    
+
     This plugin enables precise control of Red Pitaya's Arbitrary Signal Generator
     frequency through PyMoDAQ's actuator interface. It uses a centralized PyRPL
     wrapper to manage connections and prevent conflicts between multiple plugins.
-    
+
     The plugin treats ASG frequency as the actuator position, allowing PyMoDAQ to:
     - Set absolute frequency values (move_abs)
     - Make relative frequency adjustments (move_rel)
     - Read current frequency values (get_actuator_value)
     - Control waveform parameters and output settings
-    
+
     Key Features:
     - Hardware ASG frequency control with 0-62.5MHz range
     - Dual-channel support (ASG0, ASG1)
@@ -150,7 +150,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     - Thread-safe operations via PyRPL wrapper
     - Mock mode for development without hardware
     - Comprehensive error handling and status reporting
-    
+
     Attributes:
     -----------
     controller: PyRPLConnection
@@ -164,7 +164,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     mock_frequency: float
         Simulated frequency value for mock mode
     """
-    
+
     is_multiaxes = False
     _axis_names = ['Frequency']
     _controller_units = 'Hz'  # Frequency units for ASG control
@@ -176,47 +176,47 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def ini_attributes(self) -> None:
         """
         Initialize plugin attributes and prepare for hardware connection.
-        
+
         This method sets up the initial state of the plugin, including connection
         management, mock mode configuration, and parameter validation.
         """
         self.controller: Optional[PyRPLConnection] = None
         self.pyrpl_manager: PyRPLManager = PyRPLManager.get_instance()
         self.asg_channel: Optional[ASGChannel] = None
-        
+
         # Mock mode attributes
         self.mock_mode: bool = False
         self.mock_frequency: float = 1000.0  # Default mock frequency
         self.mock_min_freq: float = 0.0
         self.mock_max_freq: float = 1e6
-        
+
         # Connection state tracking
         self.connection_status: str = "Disconnected"
         self.last_error: Optional[str] = None
-        
+
         # ASG configuration storage
         self.current_asg_config: Optional[ASGConfiguration] = None
-        
+
         # Configuration management
         self.config = get_pyrpl_config()
-        
+
         # Threading support
         self.hardware_manager = ThreadedHardwareManager(
-            max_workers=2, 
+            max_workers=2,
             status_callback=self.emit_status
         )
-        
+
         logger.info("ASG Plugin attributes initialized")
 
     def get_actuator_value(self) -> float:
         """
         Get the current ASG frequency value.
-        
+
         Returns:
         --------
         float
             Current ASG frequency in Hz
-            
+
         Raises:
         -------
         Exception
@@ -226,20 +226,20 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             if self.mock_mode:
                 logger.debug(f"Mock mode: returning frequency {self.mock_frequency} Hz")
                 return self.mock_frequency
-            
+
             if self.controller is None or not self.controller.is_connected:
                 raise Exception("ASG controller not connected")
-            
+
             if self.asg_channel is None:
                 raise Exception("ASG channel not configured")
-            
+
             frequency = self.controller.get_asg_frequency(self.asg_channel)
             if frequency is None:
                 raise Exception("Failed to read ASG frequency")
-            
+
             logger.debug(f"Read ASG frequency: {frequency} Hz")
             return frequency
-            
+
         except Exception as e:
             error_msg = f"Failed to get ASG frequency: {str(e)}"
             logger.error(error_msg)
@@ -249,32 +249,32 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def close(self) -> None:
         """
         Clean shutdown of the ASG plugin.
-        
+
         Safely disconnects from Red Pitaya hardware, disables ASG output,
         and cleans up resources. This method ensures that the ASG output
         is disabled before disconnection to prevent unexpected signals.
         """
         logger.info("Closing ASG Plugin")
-        
+
         try:
             if not self.mock_mode and self.controller is not None:
                 # Safely disable ASG output before closing
-                if (self.controller.is_connected and 
+                if (self.controller.is_connected and
                     self.asg_channel is not None):
-                    
+
                     logger.info(f"Disabling ASG {self.asg_channel.value} output")
                     self.controller.enable_asg_output(self.asg_channel, False)
-                
+
                 # Disconnect from Red Pitaya
                 self.controller.disconnect(self.emit_status)
-                
+
             self.controller = None
             self.asg_channel = None
             self.current_asg_config = None
             self.connection_status = "Disconnected"
-            
+
             logger.info("ASG Plugin closed successfully")
-            
+
         except Exception as e:
             error_msg = f"Error during ASG Plugin shutdown: {str(e)}"
             logger.error(error_msg)
@@ -283,10 +283,10 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def commit_settings(self, param: Parameter) -> None:
         """
         Handle parameter changes and apply them to the ASG hardware.
-        
+
         This method is called whenever a parameter changes in the PyMoDAQ GUI.
         It validates the new values and applies them to the ASG configuration.
-        
+
         Parameters:
         -----------
         param : Parameter
@@ -295,26 +295,26 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         param_path = self.get_param_path(param)
         param_name = param.name()
         param_value = param.value()
-        
+
         logger.debug(f"Parameter changed: {param_path} = {param_value}")
-        
+
         try:
             # Handle ASG configuration parameters
-            if param_name in ['waveform', 'amplitude', 'offset', 'phase', 
+            if param_name in ['waveform', 'amplitude', 'offset', 'phase',
                               'trigger_source', 'output_enable']:
                 self._update_asg_configuration()
-                
+
             elif param_name in ['frequency_min', 'frequency_max']:
                 self._validate_frequency_limits()
-                
+
             elif param_name == 'debug_logging':
                 self._setup_logging(param_value)
-                
+
             elif param_name == 'mock_mode':
                 if param_value != self.mock_mode:
                     logger.info(f"Mock mode changing to: {param_value}")
                     # Note: Changing mock mode typically requires reinitialization
-                    
+
         except Exception as e:
             error_msg = f"Failed to apply parameter change {param_name}: {str(e)}"
             logger.error(error_msg)
@@ -323,36 +323,36 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def ini_stage(self, controller=None) -> str:
         """
         Initialize the ASG hardware connection and configuration.
-        
+
         This method establishes connection to the Red Pitaya device,
         configures the selected ASG channel, and prepares it for operation.
-        
+
         Parameters:
         -----------
         controller : optional
             External controller (not used for PyRPL integration)
-            
+
         Returns:
         --------
         str
             Status message indicating initialization result
         """
         logger.info("Initializing ASG Plugin")
-        
+
         try:
             # Extract parameters
             self.mock_mode = self.settings.child('dev_settings', 'mock_mode').value()
             auto_connect = self.settings.child('dev_settings', 'auto_connect').value()
             debug_logging = self.settings.child('dev_settings', 'debug_logging').value()
-            
+
             # Setup logging
             self._setup_logging(debug_logging)
-            
+
             if self.mock_mode:
                 return self._initialize_mock_mode()
             else:
                 return self._initialize_hardware_mode(auto_connect)
-                
+
         except Exception as e:
             error_msg = f"ASG Plugin initialization failed: {str(e)}"
             logger.error(error_msg)
@@ -363,7 +363,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def move_abs(self, position: float) -> None:
         """
         Move ASG frequency to absolute value.
-        
+
         Parameters:
         -----------
         position : float
@@ -373,27 +373,27 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             # Validate frequency limits
             freq_min = self.settings.child('control_settings', 'frequency_min').value()
             freq_max = self.settings.child('control_settings', 'frequency_max').value()
-            
+
             if not (freq_min <= position <= freq_max):
                 raise ValueError(f"Frequency {position} Hz out of range [{freq_min}, {freq_max}] Hz")
-            
+
             if self.mock_mode:
                 self.mock_frequency = position
                 logger.debug(f"Mock mode: set frequency to {position} Hz")
                 return
-            
+
             if self.controller is None or not self.controller.is_connected:
                 raise Exception("ASG controller not connected")
-            
+
             if self.asg_channel is None:
                 raise Exception("ASG channel not configured")
-            
+
             success = self.controller.set_asg_frequency(self.asg_channel, position)
             if not success:
                 raise Exception("Failed to set ASG frequency")
-            
+
             logger.info(f"Set ASG frequency to {position} Hz")
-            
+
         except Exception as e:
             error_msg = f"Failed to move ASG to {position} Hz: {str(e)}"
             logger.error(error_msg)
@@ -403,7 +403,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def move_home(self) -> None:
         """
         Move ASG frequency to home position (default frequency).
-        
+
         For ASG, home position is defined as 1kHz.
         """
         logger.info("Moving ASG to home position (1kHz)")
@@ -412,7 +412,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def move_rel(self, position: float) -> None:
         """
         Move ASG frequency by relative amount.
-        
+
         Parameters:
         -----------
         position : float
@@ -421,10 +421,10 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         try:
             current_freq = self.get_actuator_value()
             target_freq = current_freq + position
-            
+
             logger.debug(f"Relative move: {current_freq} + {position} = {target_freq} Hz")
             self.move_abs(target_freq)
-            
+
         except Exception as e:
             error_msg = f"Failed to move ASG relatively by {position} Hz: {str(e)}"
             logger.error(error_msg)
@@ -434,60 +434,60 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     def stop_motion(self) -> None:
         """
         Stop ASG operation by disabling output.
-        
+
         For ASG, stopping motion means disabling the output signal.
         """
         try:
             logger.info("Stopping ASG output")
-            
+
             if self.mock_mode:
                 logger.debug("Mock mode: ASG output stopped")
                 return
-            
-            if (self.controller is not None and 
-                self.controller.is_connected and 
+
+            if (self.controller is not None and
+                self.controller.is_connected and
                 self.asg_channel is not None):
-                
+
                 success = self.controller.enable_asg_output(self.asg_channel, False)
                 if success:
                     logger.info("ASG output disabled")
                 else:
                     logger.warning("Failed to disable ASG output")
-            
+
         except Exception as e:
             error_msg = f"Failed to stop ASG: {str(e)}"
             logger.error(error_msg)
             self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
 
     # Helper methods
-    
+
     def _initialize_mock_mode(self) -> str:
         """Initialize plugin in mock mode for development."""
         logger.info("Initializing ASG Plugin in mock mode")
-        
+
         self.connection_status = "Mock Mode"
         self.mock_frequency = 1000.0  # Default 1kHz
-        
+
         # Setup mock frequency limits
         self.mock_min_freq = self.settings.child('control_settings', 'frequency_min').value()
         self.mock_max_freq = self.settings.child('control_settings', 'frequency_max').value()
-        
+
         return "ASG Plugin initialized in mock mode"
 
     def _initialize_hardware_mode(self, auto_connect: bool) -> str:
         """Initialize plugin with real hardware."""
         logger.info("Initializing ASG Plugin with hardware")
-        
+
         # Get connection parameters
         hostname = self.settings.child('connection_settings', 'redpitaya_host').value()
         config_name = self.settings.child('connection_settings', 'config_name').value()
         timeout = self.settings.child('connection_settings', 'connection_timeout').value()
         retry_attempts = self.settings.child('connection_settings', 'retry_attempts').value()
-        
+
         # Get ASG channel
         asg_channel_name = self.settings.child('asg_settings', 'asg_channel').value()
         self.asg_channel = ASGChannel(asg_channel_name)
-        
+
         if auto_connect:
             # Establish connection
             self.controller = self.pyrpl_manager.connect_device(
@@ -497,16 +497,16 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
                 connection_timeout=timeout,
                 retry_attempts=retry_attempts
             )
-            
+
             if self.controller is None or not self.controller.is_connected:
                 error_msg = f"Failed to connect to Red Pitaya at {hostname}"
                 self.connection_status = "Connection Failed"
                 return error_msg
-            
+
             # Configure ASG
             self._configure_asg_hardware()
             self.connection_status = "Connected"
-            
+
             return f"ASG Plugin connected to {hostname} on channel {asg_channel_name}"
         else:
             self.connection_status = "Ready (Not Connected)"
@@ -516,7 +516,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         """Configure ASG hardware with current parameters."""
         if self.controller is None or self.asg_channel is None:
             return
-        
+
         # Create ASG configuration from parameters
         config = ASGConfiguration(
             frequency=self.mock_frequency,  # Will be updated by moves
@@ -529,7 +529,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             frequency_min=self.settings.child('control_settings', 'frequency_min').value(),
             frequency_max=self.settings.child('control_settings', 'frequency_max').value(),
         )
-        
+
         success = self.controller.configure_asg(self.asg_channel, config)
         if success:
             self.current_asg_config = config
@@ -541,7 +541,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         """Update ASG configuration when parameters change."""
         if self.mock_mode or self.controller is None or not self.controller.is_connected:
             return
-        
+
         try:
             self._configure_asg_hardware()
         except Exception as e:
@@ -551,7 +551,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         """Validate frequency limit parameters."""
         freq_min = self.settings.child('control_settings', 'frequency_min').value()
         freq_max = self.settings.child('control_settings', 'frequency_max').value()
-        
+
         if freq_min >= freq_max:
             logger.warning(f"Invalid frequency limits: min={freq_min} >= max={freq_max}")
             # Reset to safe defaults
