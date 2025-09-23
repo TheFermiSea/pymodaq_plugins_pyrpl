@@ -125,6 +125,17 @@ def get_asg_parameters():
             {'title': 'Enable ASG on Connect:', 'name': 'auto_enable_asg', 'type': 'bool',
              'value': False, 'tip': 'Automatically enable ASG output on connection'},
         ]},
+
+        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
+            {'title': 'Open Native ASG GUI', 'name': 'open_native_asg', 'type': 'action',
+             'tip': 'Launch PyRPL native ASG widget for advanced waveform configuration'},
+            {'title': 'Open Spectrum Analyzer', 'name': 'open_spectrum_analyzer', 'type': 'action',
+             'tip': 'Launch PyRPL spectrum analyzer for output signal analysis'},
+            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
+             'tip': 'Read current ASG settings from hardware and update PyMoDAQ parameters'},
+            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
+             'value': False, 'tip': 'Show diagnostic information in status messages'},
+        ]},
     ]
 
 
@@ -193,6 +204,11 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         # Connection state tracking
         self.connection_status: str = "Disconnected"
         self.last_error: Optional[str] = None
+
+        # Native widget instances (for hybrid approach)
+        self.native_asg_widget = None
+        self.spectrum_analyzer_widget = None
+        self.show_diagnostics: bool = False
 
         # ASG configuration storage
         self.current_asg_config: Optional[ASGConfiguration] = None
@@ -314,6 +330,24 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
                 if param_value != self.mock_mode:
                     logger.info(f"Mock mode changing to: {param_value}")
                     # Note: Changing mock mode typically requires reinitialization
+
+            elif param_name == 'open_native_asg':
+                # Launch PyRPL native ASG widget
+                self._launch_native_asg_widget()
+
+            elif param_name == 'open_spectrum_analyzer':
+                # Launch PyRPL spectrum analyzer
+                self._launch_spectrum_analyzer_widget()
+
+            elif param_name == 'sync_from_hardware':
+                # Synchronize parameters from hardware
+                self._sync_parameters_from_hardware()
+
+            elif param_name == 'show_diagnostics':
+                # Toggle diagnostic information
+                self.show_diagnostics = param_value
+                status = "Enabled" if self.show_diagnostics else "Disabled"
+                self.emit_status(ThreadCommand('Update_Status', [f"Advanced diagnostics: {status}", 'log']))
 
         except Exception as e:
             error_msg = f"Failed to apply parameter change {param_name}: {str(e)}"
@@ -565,6 +599,194 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             logger.debug("Debug logging enabled for ASG Plugin")
         else:
             logger.setLevel(logging.INFO)
+
+    def _launch_native_asg_widget(self):
+        """
+        Launch PyRPL's native ASG widget for advanced waveform configuration.
+
+        This opens a standalone PyRPL ASG interface that provides
+        advanced waveform controls and real-time visualization.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Native ASG widget not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch native widget: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Get the ASG module
+            asg_module = getattr(pyrpl_instance.rp, self.asg_channel.value)
+
+            # Close existing widget if open
+            if self.native_asg_widget is not None:
+                try:
+                    self.native_asg_widget.close()
+                except:
+                    pass
+                self.native_asg_widget = None
+
+            # Create and show the native ASG widget
+            self.native_asg_widget = asg_module.create_widget()
+            self.native_asg_widget.setWindowTitle(f"PyRPL {self.asg_channel.value.upper()} - Native Interface")
+            self.native_asg_widget.show()
+
+            # Bring window to front
+            self.native_asg_widget.raise_()
+            self.native_asg_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Launched native ASG widget for {self.asg_channel.value}", 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Native widget address: {hex(id(self.native_asg_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch native ASG widget: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _launch_spectrum_analyzer_widget(self):
+        """
+        Launch PyRPL's spectrum analyzer for ASG output analysis.
+
+        This provides real-time spectrum analysis of the ASG output signals.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Spectrum analyzer not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch spectrum analyzer: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Check if spectrum analyzer is available
+            if not hasattr(pyrpl_instance.rp, 'spectrumanalyzer'):
+                raise Exception("Spectrum analyzer module not available in this PyRPL version")
+
+            # Close existing widget if open
+            if self.spectrum_analyzer_widget is not None:
+                try:
+                    self.spectrum_analyzer_widget.close()
+                except:
+                    pass
+                self.spectrum_analyzer_widget = None
+
+            # Create and show the spectrum analyzer widget
+            sa_module = pyrpl_instance.rp.spectrumanalyzer
+            self.spectrum_analyzer_widget = sa_module.create_widget()
+            self.spectrum_analyzer_widget.setWindowTitle("PyRPL Spectrum Analyzer - ASG Output")
+            self.spectrum_analyzer_widget.show()
+
+            # Bring window to front
+            self.spectrum_analyzer_widget.raise_()
+            self.spectrum_analyzer_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Launched PyRPL spectrum analyzer', 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Spectrum analyzer widget address: {hex(id(self.spectrum_analyzer_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch spectrum analyzer: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _sync_parameters_from_hardware(self):
+        """
+        Synchronize PyMoDAQ parameters with current ASG hardware state.
+
+        This reads the current ASG configuration from the Red Pitaya
+        and updates the PyMoDAQ parameter tree to match.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Hardware sync not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot sync: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get current ASG configuration from hardware
+            asg_config = self.controller.get_asg_configuration(self.asg_channel)
+            if asg_config is None:
+                raise Exception("Failed to read ASG configuration from hardware")
+
+            # Update PyMoDAQ parameters to match hardware
+            with self.settings.child('signal_params').blockTreeSignals():
+                self.settings.child('signal_params', 'frequency').setValue(asg_config.frequency)
+                self.settings.child('signal_params', 'amplitude').setValue(asg_config.amplitude)
+                self.settings.child('signal_params', 'offset').setValue(asg_config.offset)
+
+            with self.settings.child('asg_config').blockTreeSignals():
+                self.settings.child('asg_config', 'waveform').setValue(asg_config.waveform.value)
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Synchronized parameters from {self.asg_channel.value} hardware", 'log']))
+
+            if self.show_diagnostics:
+                diag_msg = (f"Hardware sync - Freq: {asg_config.frequency:.1f}Hz, "
+                           f"Amp: {asg_config.amplitude:.3f}V, "
+                           f"Waveform: {asg_config.waveform.value}")
+                self.emit_status(ThreadCommand('Update_Status', [diag_msg, 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to sync from hardware: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def close(self):
+        """
+        Close the plugin and cleanup resources.
+
+        This ensures proper cleanup of native widgets and PyRPL connections.
+        """
+        # Close native widgets if open
+        if self.native_asg_widget is not None:
+            try:
+                self.native_asg_widget.close()
+            except:
+                pass
+            self.native_asg_widget = None
+
+        if self.spectrum_analyzer_widget is not None:
+            try:
+                self.spectrum_analyzer_widget.close()
+            except:
+                pass
+            self.spectrum_analyzer_widget = None
+
+        # Disconnect from PyRPL
+        if self.controller and self.controller.is_connected:
+            try:
+                self.pyrpl_manager.disconnect(self.hostname)
+                logger.debug("Disconnected from PyRPL")
+            except Exception as e:
+                logger.warning(f"Error during PyRPL disconnect: {e}")
+
+        logger.debug("DAQ_Move_PyRPL_ASG closed")
 
 
 if __name__ == '__main__':

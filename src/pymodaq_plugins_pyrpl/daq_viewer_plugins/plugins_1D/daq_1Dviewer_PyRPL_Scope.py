@@ -304,6 +304,38 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                     'tip': 'Maximum time to wait for triggered acquisition'
                 }
             ]
+        },
+        {
+            'title': 'Advanced Tools:',
+            'name': 'advanced_tools',
+            'type': 'group',
+            'children': [
+                {
+                    'title': 'Open Native Scope GUI',
+                    'name': 'open_native_scope',
+                    'type': 'action',
+                    'tip': 'Launch PyRPL native scope widget for advanced signal analysis'
+                },
+                {
+                    'title': 'Open Curve Tracer',
+                    'name': 'open_curve_tracer',
+                    'type': 'action',
+                    'tip': 'Launch PyRPL curve tracer for I-V characteristic measurements'
+                },
+                {
+                    'title': 'Sync from Hardware',
+                    'name': 'sync_from_hardware',
+                    'type': 'action',
+                    'tip': 'Read current scope settings from hardware and update PyMoDAQ parameters'
+                },
+                {
+                    'title': 'Advanced Diagnostics',
+                    'name': 'show_diagnostics',
+                    'type': 'bool',
+                    'value': False,
+                    'tip': 'Show diagnostic information in status messages'
+                }
+            ]
         }
     ]
 
@@ -315,6 +347,11 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
 
         # Data structure
         self.x_axis: Optional[Axis] = None
+
+        # Native widget instances (for hybrid approach)
+        self.native_scope_widget = None
+        self.curve_tracer_widget = None
+        self.show_diagnostics: bool = False
 
     def _update_timing_parameters(self):
         """Update calculated timing parameters based on decimation."""
@@ -382,6 +419,24 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
             if self.controller is not None and hasattr(self.controller, 'is_connected'):
                 if self.controller.is_connected and self.scope_config is not None:
                     self._update_scope_configuration()
+
+        elif param_name == 'open_native_scope':
+            # Launch PyRPL native scope widget
+            self._launch_native_scope_widget()
+
+        elif param_name == 'open_curve_tracer':
+            # Launch PyRPL curve tracer
+            self._launch_curve_tracer_widget()
+
+        elif param_name == 'sync_from_hardware':
+            # Synchronize parameters from hardware
+            self._sync_parameters_from_hardware()
+
+        elif param_name == 'show_diagnostics':
+            # Toggle diagnostic information
+            self.show_diagnostics = param.value()
+            status = "Enabled" if self.show_diagnostics else "Disabled"
+            self.emit_status(ThreadCommand('Update_Status', [f"Advanced diagnostics: {status}", 'log']))
 
     def _create_scope_configuration(self) -> ScopeConfiguration:
         """Create scope configuration from current parameters."""
@@ -700,6 +755,200 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                 [f'Error stopping acquisition: {str(e)}', 'log']))
 
         return ''
+
+    def _launch_native_scope_widget(self):
+        """
+        Launch PyRPL's native scope widget for advanced signal analysis.
+
+        This opens a standalone PyRPL scope interface that provides
+        advanced triggering, measurement cursors, and analysis tools.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Native scope widget not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch native widget: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Close existing widget if open
+            if self.native_scope_widget is not None:
+                try:
+                    self.native_scope_widget.close()
+                except:
+                    pass
+                self.native_scope_widget = None
+
+            # Create and show the native scope widget
+            self.native_scope_widget = pyrpl_instance.rp.scope.create_widget()
+            self.native_scope_widget.setWindowTitle("PyRPL Scope - Native Interface")
+            self.native_scope_widget.show()
+
+            # Bring window to front
+            self.native_scope_widget.raise_()
+            self.native_scope_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Launched native PyRPL scope widget', 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Native widget address: {hex(id(self.native_scope_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch native scope widget: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _launch_curve_tracer_widget(self):
+        """
+        Launch PyRPL's curve tracer for I-V characteristic measurements.
+
+        This provides specialized measurement capabilities for device characterization.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Curve tracer not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch curve tracer: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Check if curve tracer is available
+            if not hasattr(pyrpl_instance.rp, 'curvetracer'):
+                raise Exception("Curve tracer module not available in this PyRPL version")
+
+            # Close existing widget if open
+            if self.curve_tracer_widget is not None:
+                try:
+                    self.curve_tracer_widget.close()
+                except:
+                    pass
+                self.curve_tracer_widget = None
+
+            # Create and show the curve tracer widget
+            ct_module = pyrpl_instance.rp.curvetracer
+            self.curve_tracer_widget = ct_module.create_widget()
+            self.curve_tracer_widget.setWindowTitle("PyRPL Curve Tracer - I-V Characteristics")
+            self.curve_tracer_widget.show()
+
+            # Bring window to front
+            self.curve_tracer_widget.raise_()
+            self.curve_tracer_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Launched PyRPL curve tracer', 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Curve tracer widget address: {hex(id(self.curve_tracer_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch curve tracer: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _sync_parameters_from_hardware(self):
+        """
+        Synchronize PyMoDAQ parameters with current scope hardware state.
+
+        This reads the current scope configuration from the Red Pitaya
+        and updates the PyMoDAQ parameter tree to match.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Hardware sync not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot sync: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get current scope configuration from hardware
+            scope_config = self.controller.get_scope_configuration()
+            if scope_config is None:
+                raise Exception("Failed to read scope configuration from hardware")
+
+            # Update PyMoDAQ parameters to match hardware
+            with self.settings.child('timing').blockTreeSignals():
+                self.settings.child('timing', 'decimation').setValue(str(scope_config.decimation.value))
+
+            with self.settings.child('trigger').blockTreeSignals():
+                self.settings.child('trigger', 'trigger_source').setValue(scope_config.trigger_source.value)
+                self.settings.child('trigger', 'trigger_delay').setValue(scope_config.trigger_delay)
+
+            # Update input channel
+            self.settings.child('input_channel').setValue(scope_config.input_channel.value)
+
+            # Refresh timing calculations
+            self._update_timing_parameters()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Synchronized parameters from scope hardware', 'log']))
+
+            if self.show_diagnostics:
+                diag_msg = (f"Hardware sync - Channel: {scope_config.input_channel.value}, "
+                           f"Decimation: {scope_config.decimation.value}, "
+                           f"Trigger: {scope_config.trigger_source.value}")
+                self.emit_status(ThreadCommand('Update_Status', [diag_msg, 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to sync from hardware: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def close(self):
+        """
+        Close the detector and cleanup resources.
+
+        This ensures proper cleanup of native widgets and PyRPL connections.
+        """
+        # Close native widgets if open
+        if self.native_scope_widget is not None:
+            try:
+                self.native_scope_widget.close()
+            except:
+                pass
+            self.native_scope_widget = None
+
+        if self.curve_tracer_widget is not None:
+            try:
+                self.curve_tracer_widget.close()
+            except:
+                pass
+            self.curve_tracer_widget = None
+
+        # Disconnect from PyRPL
+        if self.controller is not None and hasattr(self.controller, 'is_connected'):
+            if self.controller.is_connected:
+                try:
+                    self.controller.disconnect()
+                    logger.debug("Disconnected from PyRPL")
+                except Exception as e:
+                    logger.warning(f"Error during PyRPL disconnect: {e}")
+
+        logger.debug("DAQ_1DViewer_PyRPL_Scope closed")
 
 
 if __name__ == '__main__':

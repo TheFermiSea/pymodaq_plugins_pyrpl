@@ -376,6 +376,38 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
                     'tip': 'Maximum time allowed for data acquisition'
                 }
             ]
+        },
+        {
+            'title': 'Advanced Tools:',
+            'name': 'advanced_tools',
+            'type': 'group',
+            'children': [
+                {
+                    'title': 'Open Native IQ GUI',
+                    'name': 'open_native_iq',
+                    'type': 'action',
+                    'tip': 'Launch PyRPL native IQ widget for advanced lock-in configuration'
+                },
+                {
+                    'title': 'Open Lockbox Interface',
+                    'name': 'open_lockbox',
+                    'type': 'action',
+                    'tip': 'Launch PyRPL lockbox for comprehensive system control'
+                },
+                {
+                    'title': 'Sync from Hardware',
+                    'name': 'sync_from_hardware',
+                    'type': 'action',
+                    'tip': 'Read current IQ settings from hardware and update PyMoDAQ parameters'
+                },
+                {
+                    'title': 'Advanced Diagnostics',
+                    'name': 'show_diagnostics',
+                    'type': 'bool',
+                    'value': False,
+                    'tip': 'Show diagnostic information in status messages'
+                }
+            ]
         }
     ]
 
@@ -392,6 +424,11 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
         # Channel configuration
         self.active_channels: List[str] = []
         self.channel_data: Dict[str, float] = {}
+
+        # Native widget instances (for hybrid approach)
+        self.native_iq_widget = None
+        self.lockbox_widget = None
+        self.show_diagnostics: bool = False
 
     def commit_settings(self, param: Parameter):
         """
@@ -437,6 +474,24 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
         elif param_name in ['sampling_rate', 'max_acq_time']:
             # These take effect immediately
             logger.debug(f"Updated acquisition parameter: {param_name} = {param.value()}")
+
+        elif param_name == 'open_native_iq':
+            # Launch PyRPL native IQ widget
+            self._launch_native_iq_widget()
+
+        elif param_name == 'open_lockbox':
+            # Launch PyRPL lockbox interface
+            self._launch_lockbox_widget()
+
+        elif param_name == 'sync_from_hardware':
+            # Synchronize parameters from hardware
+            self._sync_parameters_from_hardware()
+
+        elif param_name == 'show_diagnostics':
+            # Toggle diagnostic information
+            self.show_diagnostics = param.value()
+            status = "Enabled" if self.show_diagnostics else "Disabled"
+            self.emit_status(ThreadCommand('Update_Status', [f"Advanced diagnostics: {status}", 'log']))
 
     def _update_active_channels(self):
         """Update the list of active channels based on current parameters."""
@@ -807,6 +862,217 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
         logger.debug("Stop IQ acquisition requested")
         self.emit_status(ThreadCommand('Update_Status', ['IQ acquisition stopped', 'log']))
         return ''
+
+    def _launch_native_iq_widget(self):
+        """
+        Launch PyRPL's native IQ widget for advanced lock-in configuration.
+
+        This opens a standalone PyRPL IQ interface that provides
+        advanced lock-in controls and real-time visualization.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Native IQ widget not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch native widget: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Get the IQ module
+            iq_module = getattr(pyrpl_instance.rp, self.current_iq_channel.value)
+
+            # Close existing widget if open
+            if self.native_iq_widget is not None:
+                try:
+                    self.native_iq_widget.close()
+                except:
+                    pass
+                self.native_iq_widget = None
+
+            # Create and show the native IQ widget
+            self.native_iq_widget = iq_module.create_widget()
+            self.native_iq_widget.setWindowTitle(f"PyRPL {self.current_iq_channel.value.upper()} - Native Interface")
+            self.native_iq_widget.show()
+
+            # Bring window to front
+            self.native_iq_widget.raise_()
+            self.native_iq_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Launched native IQ widget for {self.current_iq_channel.value}", 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Native widget address: {hex(id(self.native_iq_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch native IQ widget: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _launch_lockbox_widget(self):
+        """
+        Launch PyRPL's lockbox interface for comprehensive system control.
+
+        This provides access to PyRPL's complete lockbox functionality
+        for complex multi-module control and optimization.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Lockbox interface not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch lockbox: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Check if lockbox is available
+            if not hasattr(pyrpl_instance.rp, 'lockbox'):
+                raise Exception("Lockbox module not available in this PyRPL version")
+
+            # Close existing widget if open
+            if self.lockbox_widget is not None:
+                try:
+                    self.lockbox_widget.close()
+                except:
+                    pass
+                self.lockbox_widget = None
+
+            # Create and show the lockbox widget
+            lockbox_module = pyrpl_instance.rp.lockbox
+            self.lockbox_widget = lockbox_module.create_widget()
+            self.lockbox_widget.setWindowTitle("PyRPL Lockbox - System Control")
+            self.lockbox_widget.show()
+
+            # Bring window to front
+            self.lockbox_widget.raise_()
+            self.lockbox_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Launched PyRPL lockbox interface', 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Lockbox widget address: {hex(id(self.lockbox_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch lockbox: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _sync_parameters_from_hardware(self):
+        """
+        Synchronize PyMoDAQ parameters with current IQ hardware state.
+
+        This reads the current IQ configuration from the Red Pitaya
+        and updates the PyMoDAQ parameter tree to match.
+        """
+        mock_mode = self.settings['connection', 'mock_mode']
+        if mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Hardware sync not available in mock mode', 'log']))
+            return
+
+        if self.controller is None or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot sync: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get current IQ configuration from hardware
+            iq_config = self.controller.get_iq_configuration(self.current_iq_channel)
+            if iq_config is None:
+                raise Exception("Failed to read IQ configuration from hardware")
+
+            # Update PyMoDAQ parameters to match hardware
+            with self.settings.child('lockin_group').blockTreeSignals():
+                self.settings.child('lockin_group', 'frequency').setValue(iq_config.frequency)
+                self.settings.child('lockin_group', 'bandwidth').setValue(iq_config.bandwidth)
+                self.settings.child('lockin_group', 'phase').setValue(iq_config.phase)
+                self.settings.child('lockin_group', 'gain').setValue(iq_config.gain)
+
+            with self.settings.child('output_group').blockTreeSignals():
+                self.settings.child('output_group', 'amplitude').setValue(iq_config.amplitude)
+                self.settings.child('output_group', 'quadrature_factor').setValue(iq_config.quadrature_factor)
+                self.settings.child('output_group', 'output_direct').setValue(iq_config.output_direct.value)
+
+            with self.settings.child('iq_settings').blockTreeSignals():
+                self.settings.child('iq_settings', 'input_channel').setValue(iq_config.input_channel.value)
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Synchronized parameters from {self.current_iq_channel.value} hardware", 'log']))
+
+            if self.show_diagnostics:
+                diag_msg = (f"Hardware sync - Freq: {iq_config.frequency:.1f}Hz, "
+                           f"BW: {iq_config.bandwidth:.1f}Hz, "
+                           f"Phase: {iq_config.phase:.1f}°, "
+                           f"Gain: {iq_config.gain:.3f}")
+                self.emit_status(ThreadCommand('Update_Status', [diag_msg, 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to sync from hardware: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def close(self):
+        """
+        Close the detector and cleanup resources including native widgets.
+
+        This extends the base close method to ensure proper cleanup
+        of PyRPL native widgets and connections.
+        """
+        # Close native widgets if open
+        if self.native_iq_widget is not None:
+            try:
+                self.native_iq_widget.close()
+            except:
+                pass
+            self.native_iq_widget = None
+
+        if self.lockbox_widget is not None:
+            try:
+                self.lockbox_widget.close()
+            except:
+                pass
+            self.lockbox_widget = None
+
+        # Call parent close method for standard cleanup
+        try:
+            if self.is_master and self.controller is not None:
+                if hasattr(self.controller, 'is_connected') and self.controller.is_connected:
+                    self.controller.disconnect()
+                    logger.debug("Disconnected from PyRPL")
+
+            # Clear data structures
+            self.active_channels.clear()
+            self.channel_data.clear()
+            self.last_acquisition_time = 0.0
+            self.iq_config = None
+            self.current_iq_channel = None
+
+            logger.info("PyRPL IQ detector closed successfully")
+
+        except Exception as e:
+            error_msg = f"Error during detector close: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
 
 
 if __name__ == '__main__':
