@@ -48,15 +48,8 @@ Plugin Components
 
 This plugin provides a comprehensive suite of Red Pitaya hardware modules:
 
-**PID Controllers & Models**
-++++++++++++++++++++++++++++
-
-* **PIDModelPyrpl**: Direct PyRPL PID model for PyMoDAQ PID extension
-
-  - Hardware PID control bypassing external actuators/detectors
-  - Direct Red Pitaya communication for minimal latency
-  - Configurable input/output channel routing
-  - Automatic gain and limit management
+**PID Controllers**
+++++++++++++++++++
 
 * **DAQ_Move_PyRPL_PID**: PID setpoint control actuator
 
@@ -122,6 +115,15 @@ This plugin provides a comprehensive suite of Red Pitaya hardware modules:
   - **Automatic Error Recovery**: Robust connection handling and cleanup
   - **Thread Safety**: Concurrent plugin operation without conflicts
   - **Mock Mode Support**: Complete simulation for development
+
+* **PyRPL Dashboard Extension**: Centralized device management interface
+
+  - **Real-time Connection Monitoring**: Live status of all Red Pitaya devices
+  - **Device Status Table**: Hostname, connection status, reference counts
+  - **Safe Connection Management**: Connect new devices, disconnect with warnings
+  - **Plugin Activity Tracking**: Monitor which plugins are using each device
+  - **Auto-refresh Dashboard**: Configurable update rates (0.5-5 seconds)
+  - **Integration with PyMoDAQ**: Seamless dashboard extension framework
 
 Hardware Support
 ================
@@ -269,6 +271,34 @@ Basic PyMoDAQ Integration
    - Set RedPitaya Host: ``rp-f08d6c.local`` or IP address
    - Configure channels (IN1/IN2 for inputs, OUT1/OUT2 for outputs)
    - Set PID parameters (P, I, D gains)
+
+4. **Access PyRPL Dashboard Extension** (Optional):
+
+   - In PyMoDAQ Dashboard, go to **Extensions** → **PyRPL Dashboard**
+   - Monitor all active Red Pitaya connections in real-time
+   - View device status, reference counts, and connection health
+   - Connect new devices or safely disconnect unused devices
+
+PyRPL Dashboard Extension
++++++++++++++++++++++++++
+
+The PyRPL Dashboard Extension provides centralized management of all Red Pitaya devices:
+
+**Key Features:**
+
+- **Connection Overview**: See all connected Red Pitaya devices at a glance
+- **Status Monitoring**: Real-time connection status with color-coded indicators
+- **Reference Tracking**: Monitor which plugins are actively using each device
+- **Safe Management**: Warning dialogs prevent disconnecting devices in use
+- **New Connections**: Easy interface to connect additional Red Pitaya devices
+
+**Usage:**
+
+1. **Open Dashboard**: Extensions → PyRPL Dashboard
+2. **Monitor Connections**: View table showing hostname, status, config, and usage
+3. **Connect New Device**: Enter hostname in "New Connection" section
+4. **Manage Connections**: Use disconnect buttons (with safety warnings)
+5. **Auto-Refresh**: Configure monitoring update rate (default: 1 second)
 
 Plugin Configuration
 ++++++++++++++++++++
