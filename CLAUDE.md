@@ -1,6 +1,6 @@
-# Developer Guide
+# CLAUDE.md
 
-This file provides development guidance when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -8,11 +8,29 @@ This file provides development guidance when working with code in this repositor
 
 ## Development Commands
 
+### Installation
+```bash
+# Install basic plugin (without PyRPL)
+uv sync
+
+# Install PyRPL for hardware support - Choose one method:
+
+# Method 1: Using the executable script (recommended)
+./install-pyrpl
+
+# Method 2: Using the Python module directly
+uv run python src/pymodaq_plugins_pyrpl/install_pyrpl.py
+
+# Method 3: Manual PyRPL installation
+uv pip install --no-deps pyrpl>=0.9.3.0
+uv pip install nose paramiko pyyaml scp numpy pandas scipy pyqtgraph qtpy PyQt5 quamash
+
+# Install in development mode (after PyRPL)
+pip install -e .
+```
+
 ### Building and Testing
 ```bash
-# Install in development mode
-pip install -e .
-
 # Run all tests (50+ test cases)
 python -m pytest tests/
 
