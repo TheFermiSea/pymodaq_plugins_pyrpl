@@ -127,6 +127,17 @@ def get_pid_parameters():
             {'title': 'Enable PID on Connect:', 'name': 'auto_enable_pid', 'type': 'bool',
              'value': False, 'tip': 'Automatically enable PID output on connection'},
         ]},
+
+        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
+            {'title': 'Open Native PID GUI', 'name': 'open_native_pid', 'type': 'action',
+             'tip': 'Launch PyRPL native PID widget for advanced configuration and diagnostics'},
+            {'title': 'Open Transfer Function', 'name': 'open_transfer_function', 'type': 'action',
+             'tip': 'Launch PyRPL transfer function analyzer for PID tuning'},
+            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
+             'tip': 'Read current settings from hardware and update PyMoDAQ parameters'},
+            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
+             'value': False, 'tip': 'Show diagnostic information in status messages'},
+        ]},
     ]
 
 
@@ -197,6 +208,11 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
         self.hostname: str = ''
         self.config_name: str = 'pymodaq'
         self.is_pid_configured: bool = False
+
+        # Native widget instances (for hybrid approach)
+        self.native_pid_widget = None
+        self.transfer_function_widget = None
+        self.show_diagnostics: bool = False
 
         logger.debug("DAQ_Move_PyRPL_PID attributes initialized")
 
@@ -310,6 +326,24 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
         elif param.name() == 'auto_enable_pid':
             # Auto-enable setting changed
             pass  # This only affects initialization
+
+        elif param.name() == 'open_native_pid':
+            # Launch PyRPL native PID widget
+            self._launch_native_pid_widget()
+
+        elif param.name() == 'open_transfer_function':
+            # Launch PyRPL transfer function analyzer
+            self._launch_transfer_function_widget()
+
+        elif param.name() == 'sync_from_hardware':
+            # Synchronize parameters from hardware
+            self._sync_parameters_from_hardware()
+
+        elif param.name() == 'show_diagnostics':
+            # Toggle diagnostic information
+            self.show_diagnostics = param.value()
+            status = "Enabled" if self.show_diagnostics else "Disabled"
+            self.emit_status(ThreadCommand('Update_Status', [f"Advanced diagnostics: {status}", 'log']))
 
         else:
             pass  # Handle other parameters as needed
@@ -605,6 +639,196 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
             else:
                 self.emit_status(ThreadCommand('Update_Status',
                     ["PID motion stopped (controller not connected)", 'log']))
+
+    def _launch_native_pid_widget(self):
+        """
+        Launch PyRPL's native PID widget for advanced configuration.
+
+        This opens a standalone PyRPL PID interface that provides
+        advanced controls and real-time visualization capabilities
+        not available in the PyMoDAQ parameter tree.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Native PID widget not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch native widget: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Get the PID module
+            pid_module = getattr(pyrpl_instance.rp, self.pid_channel.value)
+
+            # Close existing widget if open
+            if self.native_pid_widget is not None:
+                try:
+                    self.native_pid_widget.close()
+                except:
+                    pass
+                self.native_pid_widget = None
+
+            # Create and show the native PID widget
+            self.native_pid_widget = pid_module.create_widget()
+            self.native_pid_widget.setWindowTitle(f"PyRPL {self.pid_channel.value.upper()} - Native Interface")
+            self.native_pid_widget.show()
+
+            # Bring window to front
+            self.native_pid_widget.raise_()
+            self.native_pid_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Launched native PID widget for {self.pid_channel.value}", 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Native widget address: {hex(id(self.native_pid_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch native PID widget: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _launch_transfer_function_widget(self):
+        """
+        Launch PyRPL's transfer function analyzer for PID tuning.
+
+        This provides advanced PID tuning capabilities with Bode plots
+        and transfer function analysis.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Transfer function analyzer not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot launch transfer function: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get PyRPL instance from the controller
+            pyrpl_instance = self.controller.get_pyrpl_instance()
+            if pyrpl_instance is None:
+                raise Exception("PyRPL instance not available")
+
+            # Check if network analyzer is available
+            if not hasattr(pyrpl_instance.rp, 'networkanalyzer'):
+                raise Exception("Network analyzer module not available in this PyRPL version")
+
+            # Close existing widget if open
+            if self.transfer_function_widget is not None:
+                try:
+                    self.transfer_function_widget.close()
+                except:
+                    pass
+                self.transfer_function_widget = None
+
+            # Create and show the transfer function analyzer widget
+            na_module = pyrpl_instance.rp.networkanalyzer
+            self.transfer_function_widget = na_module.create_widget()
+            self.transfer_function_widget.setWindowTitle("PyRPL Network Analyzer - Transfer Function")
+            self.transfer_function_widget.show()
+
+            # Bring window to front
+            self.transfer_function_widget.raise_()
+            self.transfer_function_widget.activateWindow()
+
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Launched PyRPL transfer function analyzer', 'log']))
+
+            if self.show_diagnostics:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Transfer function widget address: {hex(id(self.transfer_function_widget))}", 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to launch transfer function analyzer: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def _sync_parameters_from_hardware(self):
+        """
+        Synchronize PyMoDAQ parameters with current hardware state.
+
+        This reads the current PID configuration from the Red Pitaya
+        and updates the PyMoDAQ parameter tree to match.
+        """
+        if self.mock_mode:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Hardware sync not available in mock mode', 'log']))
+            return
+
+        if not self.controller or not self.controller.is_connected:
+            self.emit_status(ThreadCommand('Update_Status',
+                ['Cannot sync: PyRPL not connected', 'log']))
+            return
+
+        try:
+            # Get current PID configuration from hardware
+            pid_config = self.controller.get_pid_configuration(self.pid_channel)
+            if pid_config is None:
+                raise Exception("Failed to read PID configuration from hardware")
+
+            # Update PyMoDAQ parameters to match hardware
+            with self.settings.child('pid_params').blockTreeSignals():
+                self.settings.child('pid_params', 'p_gain').setValue(pid_config.p_gain)
+                self.settings.child('pid_params', 'i_gain').setValue(pid_config.i_gain)
+                self.settings.child('pid_params', 'd_gain').setValue(pid_config.d_gain)
+
+            with self.settings.child('pid_config').blockTreeSignals():
+                self.settings.child('pid_config', 'input_channel').setValue(pid_config.input_channel.value)
+                self.settings.child('pid_config', 'output_channel').setValue(pid_config.output_channel.value)
+
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Synchronized parameters from {self.pid_channel.value} hardware", 'log']))
+
+            if self.show_diagnostics:
+                diag_msg = (f"Hardware sync - P: {pid_config.p_gain:.3f}, "
+                           f"I: {pid_config.i_gain:.3f}, D: {pid_config.d_gain:.3f}")
+                self.emit_status(ThreadCommand('Update_Status', [diag_msg, 'log']))
+
+        except Exception as e:
+            error_msg = f"Failed to sync from hardware: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+
+    def close(self):
+        """
+        Close the plugin and cleanup resources.
+
+        This ensures proper cleanup of native widgets and PyRPL connections.
+        """
+        # Close native widgets if open
+        if self.native_pid_widget is not None:
+            try:
+                self.native_pid_widget.close()
+            except:
+                pass
+            self.native_pid_widget = None
+
+        if self.transfer_function_widget is not None:
+            try:
+                self.transfer_function_widget.close()
+            except:
+                pass
+            self.transfer_function_widget = None
+
+        # Disconnect from PyRPL
+        if self.controller and self.controller.is_connected:
+            try:
+                self.pyrpl_manager.disconnect(self.hostname)
+                logger.debug("Disconnected from PyRPL")
+            except Exception as e:
+                logger.warning(f"Error during PyRPL disconnect: {e}")
+
+        logger.debug("DAQ_Move_PyRPL_PID closed")
 
 
 if __name__ == '__main__':
