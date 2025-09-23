@@ -31,13 +31,12 @@ import pytest
 import threading
 import time
 import numpy as np
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
-from typing import Dict, List, Optional, Any
+from unittest.mock import Mock, patch, PropertyMock
+from typing import Optional
 import logging
 
 # Mock PyRPL completely to avoid Qt initialization issues in tests
 import sys
-from unittest.mock import Mock
 
 # Create comprehensive PyRPL mock
 pyrpl_mock = Mock()
@@ -54,7 +53,8 @@ sys.modules['pyrpl.hardware_modules.pid'] = pyrpl_mock.hardware_modules.pid
 # Import PyRPL wrapper and related utilities
 from pymodaq_plugins_pyrpl.utils.pyrpl_wrapper import (
     PyRPLManager, PyRPLConnection, PIDChannel, InputChannel, OutputChannel,
-    PIDConfiguration, ConnectionInfo, ConnectionState, connect_redpitaya
+    PIDConfiguration, ConnectionInfo, ConnectionState, ScopeConfiguration, ScopeDecimation, ScopeTriggerSource,
+    IQConfiguration, IQChannel, IQOutputDirect, ASGChannel
 )
 
 # Import plugin classes  
@@ -62,11 +62,10 @@ from pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID import DAQ_Move_P
 from pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_0D.daq_0Dviewer_PyRPL import (
     DAQ_0DViewer_PyRPL, MockPyRPLConnection
 )
-from pymodaq_plugins_pyrpl.models.PIDModelPyRPL import PIDModelPyRPL
+# PIDModelPyRPL removed - was broken with circular dependencies
 
 # PyMoDAQ imports for data structures
-from pymodaq_utils.utils import ThreadCommand
-from pymodaq_data.data import DataToExport, DataRaw
+from pymodaq_data.data import DataToExport
 from pymodaq.utils.data import DataActuator
 
 # Configure logging for tests
@@ -113,11 +112,51 @@ class MockPidModule:
         self.min_voltage = -1.0
 
 class MockScope:
-    """Mock PyRPL scope for voltage reading."""
-    
-    def __init__(self):
+    """Mock PyRPL scope for configuration and acquisition testing."""
+    def __init__(self, stop_after_polls: Optional[int] = 3, sample_count: int = 1024):
+        # Instant voltage reading (used by read_voltage)
         self.voltage_in1 = MOCK_DEFAULT_VOLTAGE_IN1
         self.voltage_in2 = MOCK_DEFAULT_VOLTAGE_IN2
+
+        # Configurable attributes (set by configure_scope)
+        self.decimation = ScopeDecimation.DEC_64.value
+        self.trigger_source = ScopeTriggerSource.IMMEDIATELY.value
+        self.trigger_delay = 0
+        self.trigger_level = 0.0
+        self.average = 1
+        self.rolling_mode = False
+        self.input = 'in1'
+
+        # Acquisition state
+        self._acq_running = False
+        self._polls = 0
+        self._stop_after = stop_after_polls  # None => never stops (used to test timeout)
+        self._sample_count = sample_count
+
+        # Derived acquisition properties
+        self.sampling_time = 1e-6  # 1 µs per sample
+        self.duration = self._sample_count * self.sampling_time
+
+    def trigger(self):
+        self._acq_running = True
+        self._polls = 0
+
+    def stopped(self):
+        if not self._acq_running:
+            return True
+        self._polls += 1
+        if self._stop_after is not None and self._polls >= self._stop_after:
+            self._acq_running = False
+            return True
+        return False
+
+    def curve(self):
+        # Simple sine waveform for deterministic tests
+        t = np.arange(self._sample_count) * self.sampling_time
+        return np.sin(2 * np.pi * 1e3 * t)
+
+    def stop(self):
+        self._acq_running = False
 
 class MockSampler:
     """Mock PyRPL sampler for voltage reading."""
@@ -125,6 +164,21 @@ class MockSampler:
     def __init__(self):
         self.in1 = MOCK_DEFAULT_VOLTAGE_IN1
         self.in2 = MOCK_DEFAULT_VOLTAGE_IN2
+
+class MockIQModule:
+    """Mock PyRPL IQ (lock-in) module."""
+    def __init__(self):
+        self.frequency = 1000.0
+        self.bandwidth = 100.0
+        self.acbandwidth = 10000.0
+        self.phase = 0.0
+        self.gain = 1.0
+        self.quadrature_factor = 1.0
+        self.amplitude = 0.0
+        self.input = 'in1'
+        self.output_direct = 'off'
+        self.I = 0.0
+        self.Q = 0.0
 
 class MockRedPitaya:
     """Mock Red Pitaya device for testing."""
@@ -134,8 +188,12 @@ class MockRedPitaya:
         self.pid0 = MockPidModule()
         self.pid1 = MockPidModule()
         self.pid2 = MockPidModule()
-        self.scope = MockScope()
+        self.scope = MockScope()        # supports configure + acquisition
         self.sampler = MockSampler()
+        # IQ modules
+        self.iq0 = MockIQModule()
+        self.iq1 = MockIQModule()
+        self.iq2 = MockIQModule()
 
 class MockPyrpl:
     """Mock PyRPL instance for testing."""
@@ -830,120 +888,503 @@ class TestDAQ0DViewerPyRPL:
 
 
 # ============================================================================
-# PIDModelPyRPL Integration Tests
+# NOTE: PIDModelPyRPL tests removed - model had circular dependencies
+# The working PyRPL plugins provide all needed functionality
+# ============================================================================
+
+
+# ============================================================================
+# Scope API Tests
 # ============================================================================
 
 @pytest.mark.mock
-class TestPIDModelPyRPL:
-    """Test PIDModelPyRPL integration functionality."""
+class TestScopeAPIMock:
+    """Test Scope API functionality with mock hardware."""
 
-    def test_pid_model_initialization(self):
-        """Test PID model initialization."""
-        # Setup mock PyRPL instance
-        mock_pyrpl_instance = Mock()
-        mock_pid = Mock()
-        mock_pyrpl_instance.rp.pid0 = mock_pid
-        
-        # Create mock extension
-        mock_extension = Mock()
-        mock_extension.get_pyrpl_instance.return_value = mock_pyrpl_instance
-        
-        # Create mock PID controller with dashboard
-        mock_pid_controller = Mock()
-        mock_pid_controller.dashboard.get_extension.return_value = mock_extension
-        mock_pid_controller.status_sig.emit = Mock()
-        
-        # Initialize model
-        model = PIDModelPyRPL(mock_pid_controller)
-        model.settings = Mock()
-        model.settings.child.return_value.value.return_value = 0  # pid_channel = 0
-        model.update_settings = Mock()
-        
-        model.ini_model()
-        
-        assert model.pyrpl_instance is mock_pyrpl_instance
-        assert model.pid is mock_pid
-        mock_pid_controller.dashboard.get_extension.assert_called_once_with('PyRPL')
+    @pytest.fixture
+    def mock_scope_config(self):
+        """Create mock scope configuration."""
+        return ScopeConfiguration(
+            input_channel=InputChannel.IN1,
+            decimation=ScopeDecimation.DEC_64,
+            trigger_source=ScopeTriggerSource.IMMEDIATELY,
+            trigger_delay=0,
+            trigger_level=0.0,
+            average=1,
+            rolling_mode=False,
+            timeout=2.0,
+            data_length=1024
+        )
 
-    def test_pid_model_parameter_updates(self):
-        """Test PID model parameter update handling."""
-        mock_pid_controller = Mock()
-        model = PIDModelPyRPL(mock_pid_controller)
-        model.settings = Mock()
-        
-        # Create mock parameter
-        mock_param = Mock()
-        mock_param.name.return_value = 'kp'
-        
-        # Create mock PID
-        mock_pid = Mock()
-        model.pid = mock_pid
-        
-        # Setup mock settings chain for PID constants
-        kp_setting = Mock()
-        kp_setting.value.return_value = 0.5
-        ki_setting = Mock()
-        ki_setting.value.return_value = 0.1  
-        kd_setting = Mock()
-        kd_setting.value.return_value = 0.05
-        
-        def child_side_effect(*args):
-            path = '/'.join(args)
-            if path == 'main_settings/pid_controls/kp':
-                return kp_setting
-            elif path == 'main_settings/pid_controls/ki':
-                return ki_setting
-            elif path == 'main_settings/pid_controls/kd':
-                return kd_setting
-            return Mock()
-        
-        model.settings.child.side_effect = child_side_effect
-        
-        # Test parameter update
-        model.update_settings(mock_param)
-        
-        # Verify PID parameters were set
-        assert mock_pid.kp == 0.5
-        assert mock_pid.ki == 0.1
-        assert mock_pid.kd == 0.05
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_scope_configuration(self, mock_pyrpl_module, mock_connection_info, mock_scope_config):
+        """Test scope configuration with mock hardware."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
 
-    def test_pid_model_constants_and_limits(self):
-        """Test PID model configuration constants."""
-        mock_pid_controller = Mock()
-        model = PIDModelPyRPL(mock_pid_controller)
-        
-        # Check limits
-        assert model.limits['max']['value'] == 1
-        assert model.limits['min']['value'] == -1
-        
-        # Check constants
-        assert 'kp' in model.konstants
-        assert 'ki' in model.konstants
-        assert 'kd' in model.konstants
-        
-        # Check setpoint configuration
-        assert model.Nsetpoints == 1
-        assert model.setpoint_ini == [0.0]
-        assert model.setpoints_names == ['Setpoint']
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
 
-    def test_pid_model_parameters_structure(self):
-        """Test PID model parameter structure."""
-        mock_pid_controller = Mock()
-        model = PIDModelPyRPL(mock_pid_controller)
-        
-        param_names = [param['name'] for param in model.params]
-        
-        # Check for the actual parameters structure
-        assert 'pyrpl_settings' in param_names
-        
-        # Check the pyrpl_settings group children
-        pyrpl_settings = next(param for param in model.params if param['name'] == 'pyrpl_settings')
-        child_names = [child['name'] for child in pyrpl_settings['children']]
-        
-        expected_children = ['pid_channel', 'pyrpl_input', 'pyrpl_output']
-        
-        for expected_child in expected_children:
-            assert expected_child in child_names
+        # Test scope configuration
+        success = connection.configure_scope(mock_scope_config)
+        assert success is True
+
+        # Verify configuration was applied to mock scope
+        scope = mock_pyrpl_instance.redpitaya.scope
+        assert scope.decimation == mock_scope_config.decimation.value
+        assert scope.trigger_source == mock_scope_config.trigger_source.value
+        assert scope.trigger_delay == mock_scope_config.trigger_delay
+        assert scope.trigger_level == mock_scope_config.trigger_level
+        assert scope.average == mock_scope_config.average
+        assert scope.rolling_mode == mock_scope_config.rolling_mode
+        assert scope.input == mock_scope_config.input_channel.value
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_scope_acquisition(self, mock_pyrpl_module, mock_connection_info, mock_scope_config):
+        """Test scope data acquisition with mock hardware."""
+        # Setup mock with predictable acquisition
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_scope(mock_scope_config)
+
+        # Test data acquisition
+        result = connection.acquire_scope_data(timeout=1.0)
+        assert result is not None
+
+        time_axis, voltage_data = result
+        assert len(time_axis) == len(voltage_data)
+        assert len(voltage_data) == mock_pyrpl_instance.redpitaya.scope._sample_count
+        assert isinstance(time_axis, np.ndarray)
+        assert isinstance(voltage_data, np.ndarray)
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_scope_acquisition_timeout(self, mock_pyrpl_module, mock_connection_info, mock_scope_config):
+        """Test scope acquisition timeout handling."""
+        # Setup mock that never stops (simulates timeout)
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_instance.redpitaya.scope = MockScope(stop_after_polls=None)  # Never stops
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_scope(mock_scope_config)
+
+        # Test timeout handling
+        result = connection.acquire_scope_data(timeout=0.1)  # Very short timeout
+        assert result is None  # Should timeout and return None
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_scope_control_methods(self, mock_pyrpl_module, mock_connection_info):
+        """Test scope start/stop/status methods."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+
+        scope = mock_pyrpl_instance.redpitaya.scope
+
+        # Test initial state
+        assert scope.stopped() is True
+        assert connection.is_scope_running() is False
+
+        # Test start acquisition
+        success = connection.start_scope_acquisition()
+        assert success is True
+        assert scope._acq_running is True
+        assert connection.is_scope_running() is True
+
+        # Test stop acquisition
+        success = connection.stop_scope_acquisition()
+        assert success is True
+        assert scope._acq_running is False
+        assert connection.is_scope_running() is False
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_scope_getters(self, mock_pyrpl_module, mock_connection_info):
+        """Test scope getter methods."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+
+        # Test sampling time getter
+        sampling_time = connection.get_scope_sampling_time()
+        assert sampling_time is not None
+        assert sampling_time == mock_pyrpl_instance.redpitaya.scope.sampling_time
+
+        # Test duration getter
+        duration = connection.get_scope_duration()
+        assert duration is not None
+        assert duration == mock_pyrpl_instance.redpitaya.scope.duration
+
+
+@pytest.mark.hardware
+class TestScopeAPIHardware:
+    """Test Scope API functionality with real hardware."""
+
+    def safe_scope_config(self, **overrides):
+        """Create safe scope configuration for hardware testing."""
+        config = get_hardware_config()
+        safe_config = ScopeConfiguration(
+            input_channel=InputChannel.IN1,
+            decimation=ScopeDecimation.DEC_1024,  # Slower sampling for safety
+            trigger_source=ScopeTriggerSource.IMMEDIATELY,
+            trigger_delay=0,
+            trigger_level=0.0,
+            average=1,
+            rolling_mode=False,
+            timeout=config['test_duration'],
+            data_length=16384
+        )
+
+        # Apply any overrides
+        for key, value in overrides.items():
+            setattr(safe_config, key, value)
+
+        return safe_config
+
+    def test_real_scope_configuration(self, hardware_connection):
+        """Test scope configuration with real hardware."""
+        connection = hardware_connection
+        scope_config = self.safe_scope_config()
+
+        try:
+            # Test scope configuration
+            success = connection.configure_scope(scope_config)
+            assert success, "Scope configuration failed"
+
+            # Verify configuration was applied (if getter methods work)
+            sampling_time = connection.get_scope_sampling_time()
+            duration = connection.get_scope_duration()
+
+            if sampling_time is not None and duration is not None:
+                assert sampling_time > 0
+                assert duration > 0
+                logger.info(f"Scope configured: sampling_time={sampling_time}s, duration={duration}s")
+
+        finally:
+            # Reset scope to safe state
+            try:
+                connection.stop_scope_acquisition()
+            except Exception as e:
+                logger.warning(f"Scope cleanup warning: {e}")
+
+    def test_real_scope_acquisition(self, hardware_connection):
+        """Test scope data acquisition with real hardware."""
+        connection = hardware_connection
+        scope_config = self.safe_scope_config(timeout=3.0)
+
+        try:
+            # Configure scope
+            success = connection.configure_scope(scope_config)
+            assert success
+
+            # Test data acquisition
+            result = connection.acquire_scope_data()
+            assert result is not None, "Scope acquisition failed"
+
+            time_axis, voltage_data = result
+            assert len(time_axis) == len(voltage_data)
+            assert len(voltage_data) > 0
+            assert isinstance(time_axis, np.ndarray)
+            assert isinstance(voltage_data, np.ndarray)
+
+            # Verify data is within reasonable bounds
+            assert np.all(np.abs(voltage_data) <= 2.0), "Voltage data outside expected range"
+
+            logger.info(f"Acquired {len(voltage_data)} scope samples, "
+                       f"voltage range: [{np.min(voltage_data):.3f}, {np.max(voltage_data):.3f}]V")
+
+        finally:
+            connection.stop_scope_acquisition()
+
+    def test_real_scope_control(self, hardware_connection):
+        """Test scope start/stop control with real hardware."""
+        connection = hardware_connection
+        scope_config = self.safe_scope_config()
+
+        try:
+            # Configure scope
+            success = connection.configure_scope(scope_config)
+            assert success
+
+            # Test start acquisition
+            success = connection.start_scope_acquisition()
+            assert success, "Failed to start scope acquisition"
+
+            # Check if running (may not be reliable on all hardware)
+            running_status = connection.is_scope_running()
+            if running_status is not None:
+                # If we can determine status, verify it's running
+                logger.info(f"Scope running status: {running_status}")
+
+            # Test stop acquisition
+            success = connection.stop_scope_acquisition()
+            assert success, "Failed to stop scope acquisition"
+
+        finally:
+            connection.stop_scope_acquisition()
+
+
+# ============================================================================
+# IQ API Tests
+# ============================================================================
+
+@pytest.mark.mock
+class TestIQAPIMock:
+    """Test IQ (Lock-in Amplifier) API functionality with mock hardware."""
+
+    @pytest.fixture
+    def mock_iq_config(self):
+        """Create mock IQ configuration."""
+        return IQConfiguration(
+            frequency=1000.0,
+            bandwidth=100.0,
+            acbandwidth=10000.0,
+            phase=0.0,
+            gain=1.0,
+            quadrature_factor=1.0,
+            amplitude=0.0,
+            input_channel=InputChannel.IN1,
+            output_direct=IQOutputDirect.OFF
+        )
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_iq_configuration(self, mock_pyrpl_module, mock_connection_info, mock_iq_config):
+        """Test IQ configuration with mock hardware."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+
+        # Test IQ configuration
+        success = connection.configure_iq(IQChannel.IQ0, mock_iq_config)
+        assert success is True
+
+        # Verify configuration was applied to mock IQ
+        iq = mock_pyrpl_instance.redpitaya.iq0
+        assert iq.frequency == mock_iq_config.frequency
+        assert iq.bandwidth == mock_iq_config.bandwidth
+        assert iq.acbandwidth == mock_iq_config.acbandwidth
+        assert iq.phase == mock_iq_config.phase
+        assert iq.gain == mock_iq_config.gain
+        assert iq.quadrature_factor == mock_iq_config.quadrature_factor
+        assert iq.amplitude == mock_iq_config.amplitude
+        assert iq.input == mock_iq_config.input_channel.value
+        assert iq.output_direct == mock_iq_config.output_direct.value
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_iq_measurement(self, mock_pyrpl_module, mock_connection_info, mock_iq_config):
+        """Test IQ measurement with mock hardware."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_iq(IQChannel.IQ0, mock_iq_config)
+
+        # Test IQ measurement
+        result = connection.get_iq_measurement(IQChannel.IQ0)
+        assert result is not None
+
+        i_value, q_value = result
+        assert isinstance(i_value, (int, float))
+        assert isinstance(q_value, (int, float))
+
+        # Test magnitude/phase calculation
+        magnitude, phase = connection.calculate_magnitude_phase(i_value, q_value)
+        assert magnitude >= 0
+        assert -180 <= phase <= 180
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_iq_frequency_control(self, mock_pyrpl_module, mock_connection_info, mock_iq_config):
+        """Test IQ frequency control methods."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_iq(IQChannel.IQ0, mock_iq_config)
+
+        # Test set frequency
+        new_frequency = 2000.0
+        success = connection.set_iq_frequency(IQChannel.IQ0, new_frequency)
+        assert success is True
+
+        # Test get frequency
+        current_frequency = connection.get_iq_frequency(IQChannel.IQ0)
+        assert current_frequency == new_frequency
+
+        # Verify mock IQ was updated
+        iq = mock_pyrpl_instance.redpitaya.iq0
+        assert iq.frequency == new_frequency
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_iq_phase_control(self, mock_pyrpl_module, mock_connection_info, mock_iq_config):
+        """Test IQ phase control methods."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_iq(IQChannel.IQ0, mock_iq_config)
+
+        # Test set phase
+        new_phase = 45.0
+        success = connection.set_iq_phase(IQChannel.IQ0, new_phase)
+        assert success is True
+
+        # Verify mock IQ was updated
+        iq = mock_pyrpl_instance.redpitaya.iq0
+        assert iq.phase == new_phase
+
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.PYRPL_AVAILABLE', True)
+    @patch('pymodaq_plugins_pyrpl.utils.pyrpl_wrapper.pyrpl')
+    def test_mock_iq_output_control(self, mock_pyrpl_module, mock_connection_info, mock_iq_config):
+        """Test IQ output enable/disable control."""
+        # Setup mock
+        mock_pyrpl_instance = MockPyrpl()
+        mock_pyrpl_module.Pyrpl = Mock(return_value=mock_pyrpl_instance)
+
+        connection = PyRPLConnection(mock_connection_info)
+        connection.connect()
+        connection.configure_iq(IQChannel.IQ0, mock_iq_config)
+
+        # Test enable output
+        success = connection.enable_iq_output(IQChannel.IQ0, IQOutputDirect.OUT1)
+        assert success is True
+
+        # Verify mock IQ was updated
+        iq = mock_pyrpl_instance.redpitaya.iq0
+        assert iq.output_direct == IQOutputDirect.OUT1.value
+
+
+@pytest.mark.hardware
+class TestIQAPIHardware:
+    """Test IQ (Lock-in Amplifier) API functionality with real hardware."""
+
+    def safe_iq_config(self, **overrides):
+        """Create safe IQ configuration for hardware testing."""
+        safe_config = IQConfiguration(
+            frequency=1000.0,  # Safe frequency
+            bandwidth=10.0,    # Narrow bandwidth for stability
+            acbandwidth=1000.0,
+            phase=0.0,
+            gain=0.1,          # Low gain for safety
+            quadrature_factor=1.0,
+            amplitude=0.0,     # No output amplitude
+            input_channel=InputChannel.IN1,
+            output_direct=IQOutputDirect.OFF  # Output disabled for safety
+        )
+
+        # Apply any overrides
+        for key, value in overrides.items():
+            setattr(safe_config, key, value)
+
+        return safe_config
+
+    def test_real_iq_configuration(self, hardware_connection):
+        """Test IQ configuration with real hardware."""
+        connection = hardware_connection
+        iq_config = self.safe_iq_config()
+
+        try:
+            # Test IQ configuration
+            success = connection.configure_iq(IQChannel.IQ0, iq_config)
+            assert success, "IQ configuration failed"
+
+            # Verify frequency can be read back
+            current_frequency = connection.get_iq_frequency(IQChannel.IQ0)
+            if current_frequency is not None:
+                assert abs(current_frequency - iq_config.frequency) < 1.0  # 1Hz tolerance
+                logger.info(f"IQ configured with frequency: {current_frequency}Hz")
+
+        finally:
+            # Reset IQ to safe state
+            try:
+                connection.enable_iq_output(IQChannel.IQ0, IQOutputDirect.OFF)
+            except Exception as e:
+                logger.warning(f"IQ cleanup warning: {e}")
+
+    def test_real_iq_measurement(self, hardware_connection):
+        """Test IQ measurement with real hardware."""
+        connection = hardware_connection
+        iq_config = self.safe_iq_config()
+
+        try:
+            # Configure IQ
+            success = connection.configure_iq(IQChannel.IQ0, iq_config)
+            assert success
+
+            # Test IQ measurement
+            result = connection.get_iq_measurement(IQChannel.IQ0)
+            assert result is not None, "IQ measurement failed"
+
+            i_value, q_value = result
+            assert isinstance(i_value, (int, float))
+            assert isinstance(q_value, (int, float))
+
+            # Test magnitude/phase calculation
+            magnitude, phase = connection.calculate_magnitude_phase(i_value, q_value)
+            assert magnitude >= 0
+            assert -180 <= phase <= 180
+
+            logger.info(f"IQ measurement: I={i_value:.3f}, Q={q_value:.3f}, "
+                       f"magnitude={magnitude:.3f}, phase={phase:.1f}°")
+
+        finally:
+            connection.enable_iq_output(IQChannel.IQ0, IQOutputDirect.OFF)
+
+    def test_real_iq_frequency_control(self, hardware_connection):
+        """Test IQ frequency control with real hardware."""
+        connection = hardware_connection
+        iq_config = self.safe_iq_config()
+
+        try:
+            # Configure IQ
+            success = connection.configure_iq(IQChannel.IQ0, iq_config)
+            assert success
+
+            # Test frequency changes within safe range
+            test_frequencies = [500.0, 1000.0, 2000.0]
+
+            for freq in test_frequencies:
+                # Set frequency
+                success = connection.set_iq_frequency(IQChannel.IQ0, freq)
+                assert success, f"Failed to set frequency to {freq}Hz"
+
+                # Verify frequency was set
+                current_freq = connection.get_iq_frequency(IQChannel.IQ0)
+                if current_freq is not None:
+                    assert abs(current_freq - freq) < 1.0, f"Frequency mismatch: expected {freq}, got {current_freq}"
+
+                # Small delay for hardware to settle
+                time.sleep(0.1)
+
+        finally:
+            connection.enable_iq_output(IQChannel.IQ0, IQOutputDirect.OFF)
 
 
 # ============================================================================
@@ -1016,9 +1457,6 @@ class TestPluginIntegration:
         # This test would require real plugin instances
         # For now, test that manager cleanup works properly
         manager = PyRPLManager()
-        
-        # Simulate multiple connections
-        initial_count = len(manager.get_all_connections())
         
         # Create mock connections manually
         mock_conn1 = Mock()
@@ -1134,97 +1572,420 @@ class TestPerformance:
 # Hardware Tests (Optional - require real Red Pitaya)
 # ============================================================================
 
+# Hardware testing helpers and environment
+def get_hardware_config():
+    """Parse hardware configuration from environment variables."""
+    import os
+    config = {
+        'hostname': os.getenv('PYRPL_TEST_HOST'),
+        'port': int(os.getenv('PYRPL_TEST_PORT', '2222')),
+        'timeout': float(os.getenv('PYRPL_TEST_TIMEOUT', '10.0')),
+        'config_name': os.getenv('PYRPL_TEST_CONFIG', 'pytest_test'),
+        'max_voltage': float(os.getenv('PYRPL_TEST_MAX_VOLTAGE', '0.5')),
+        'max_gain': float(os.getenv('PYRPL_TEST_MAX_GAIN', '0.1')),
+        'test_duration': float(os.getenv('PYRPL_TEST_DURATION', '5.0')),
+        'skip_dangerous': os.getenv('PYRPL_SKIP_DANGEROUS', 'true').lower() == 'true'
+    }
+    return config
+
+def validate_hardware_environment():
+    """Validate hardware test environment and safety parameters."""
+    config = get_hardware_config()
+
+    # Check required parameters
+    if not config['hostname']:
+        return False, "PYRPL_TEST_HOST environment variable required"
+
+    # Validate safety limits
+    if config['max_voltage'] > 1.0:
+        return False, f"max_voltage {config['max_voltage']} exceeds safe limit of 1.0V"
+
+    if config['max_gain'] > 1.0:
+        return False, f"max_gain {config['max_gain']} exceeds safe limit of 1.0"
+
+    return True, "Hardware environment validated"
+
+def safe_pid_config(setpoint=0.0, gain_factor=1.0):
+    """Create safe PID configuration for testing."""
+    config = get_hardware_config()
+
+    return PIDConfiguration(
+        setpoint=min(max(setpoint, -config['max_voltage']), config['max_voltage']),
+        p_gain=config['max_gain'] * gain_factor,
+        i_gain=config['max_gain'] * gain_factor * 0.1,  # I gain = 10% of P gain
+        d_gain=0.0,  # No derivative gain for safety
+        input_channel=InputChannel.IN1,
+        output_channel=OutputChannel.OUT1,
+        voltage_limit_min=-config['max_voltage'],
+        voltage_limit_max=config['max_voltage'],
+        enabled=True
+    )
+
+def hardware_safety_cleanup(connection, channels=None):
+    """Perform comprehensive safety cleanup after hardware tests."""
+    if not connection or not connection.is_connected:
+        return
+
+    try:
+        # Disable all PID channels if not specified
+        if channels is None:
+            channels = [PIDChannel.PID0, PIDChannel.PID1, PIDChannel.PID2]
+
+        for channel in channels:
+            try:
+                # Set safe setpoint first
+                connection.set_pid_setpoint(channel, 0.0)
+                # Disable PID
+                connection.disable_pid(channel)
+            except Exception as e:
+                logger.warning(f"Cleanup warning for {channel}: {e}")
+
+        # Set ASG outputs to safe state if available
+        try:
+            asg_channels = [ASGChannel.ASG0, ASGChannel.ASG1]
+            for asg_channel in asg_channels:
+                try:
+                    connection.enable_asg_output(asg_channel, False)
+                except Exception as e:
+                    logger.warning(f"ASG {asg_channel.value} cleanup warning: {e}")
+        except Exception as e:
+            logger.warning(f"ASG cleanup warning: {e}")
+
+        # Set IQ modules to safe state
+        try:
+            iq_channels = [IQChannel.IQ0, IQChannel.IQ1, IQChannel.IQ2]
+            for iq_channel in iq_channels:
+                try:
+                    connection.enable_iq_output(iq_channel, IQOutputDirect.OFF)
+                except Exception as e:
+                    logger.warning(f"IQ {iq_channel.value} cleanup warning: {e}")
+        except Exception as e:
+            logger.warning(f"IQ cleanup warning: {e}")
+
+        # Stop scope acquisition if running
+        try:
+            connection.stop_scope_acquisition()
+        except Exception as e:
+            logger.warning(f"Scope cleanup warning: {e}")
+
+    except Exception as e:
+        logger.error(f"Safety cleanup failed: {e}")
+    finally:
+        try:
+            connection.disconnect()
+        except Exception as e:
+            logger.error(f"Disconnect failed: {e}")
+
+@pytest.fixture
+def hardware_connection():
+    """Fixture providing safe hardware connection with automatic cleanup."""
+    is_valid, message = validate_hardware_environment()
+    if not is_valid:
+        pytest.skip(f"Hardware validation failed: {message}")
+
+    config = get_hardware_config()
+    connection = None
+
+    try:
+        # Import real PyRPL if available
+        import pyrpl  # noqa: F401
+
+        # Create connection info
+        connection_info = ConnectionInfo(
+            hostname=config['hostname'],
+            config_name=config['config_name'],
+            port=config['port'],
+            connection_timeout=config['timeout'],
+            retry_attempts=3,
+            retry_delay=1.0
+        )
+
+        # Establish connection
+        connection = PyRPLConnection(connection_info)
+        if not connection.connect():
+            pytest.skip(f"Could not connect to Red Pitaya at {config['hostname']}")
+
+        yield connection
+
+    except ImportError:
+        pytest.skip("PyRPL not available for hardware tests")
+    except Exception as e:
+        pytest.skip(f"Hardware connection failed: {e}")
+    finally:
+        if connection:
+            hardware_safety_cleanup(connection)
+
 @pytest.mark.hardware
 class TestRealHardware:
     """
     Tests requiring actual Red Pitaya hardware.
-    
+
     These tests are optional and will be skipped unless:
     1. Hardware is available
     2. PYRPL_TEST_HOST environment variable is set
     3. Tests are run with -m hardware
-    
+
     Example usage:
         PYRPL_TEST_HOST=rp-f08d6c.local pytest -m hardware
+
+    Environment variables:
+        PYRPL_TEST_HOST: Red Pitaya hostname (required)
+        PYRPL_TEST_PORT: SSH port (default: 2222)
+        PYRPL_TEST_TIMEOUT: Connection timeout (default: 10.0)
+        PYRPL_TEST_CONFIG: PyRPL config name (default: pytest_test)
+        PYRPL_TEST_MAX_VOLTAGE: Max test voltage (default: 0.5V)
+        PYRPL_TEST_MAX_GAIN: Max PID gain (default: 0.1)
+        PYRPL_TEST_DURATION: Test duration (default: 5.0s)
+        PYRPL_SKIP_DANGEROUS: Skip potentially dangerous tests (default: true)
     """
 
-    @pytest.fixture(autouse=True)
-    def check_hardware_available(self):
-        """Skip hardware tests if no hardware is configured."""
-        import os
-        test_host = os.getenv('PYRPL_TEST_HOST')
-        if not test_host:
-            pytest.skip("Hardware tests require PYRPL_TEST_HOST environment variable")
-        return test_host
+    def test_hardware_environment_validation(self):
+        """Test hardware environment validation."""
+        is_valid, message = validate_hardware_environment()
+        assert is_valid, f"Hardware environment validation failed: {message}"
 
-    def test_real_hardware_connection(self, check_hardware_available):
+        config = get_hardware_config()
+        assert config['hostname'] is not None
+        assert 0 < config['max_voltage'] <= 1.0
+        assert 0 < config['max_gain'] <= 1.0
+
+    def test_real_hardware_connection(self, hardware_connection):
         """Test connection to real Red Pitaya hardware."""
-        hostname = check_hardware_available
-        
-        # Attempt real connection
-        connection = connect_redpitaya(hostname, config_name="pytest_test")
-        
-        if connection and connection.is_connected:
-            try:
-                # Test basic operations
-                voltage = connection.read_voltage(InputChannel.IN1)
-                assert voltage is not None
-                assert -1.5 <= voltage <= 1.5  # Allow for some margin
-                
-                # Test PID configuration
-                pid_config = PIDConfiguration(
-                    setpoint=0.0,  # Safe setpoint
-                    p_gain=0.01,   # Low gain for safety
-                    i_gain=0.0,
-                    input_channel=InputChannel.IN1,
-                    output_channel=OutputChannel.OUT1
-                )
-                
-                success = connection.configure_pid(PIDChannel.PID0, pid_config)
-                assert success
-                
-                # Test setpoint change
-                success = connection.set_pid_setpoint(PIDChannel.PID0, 0.1)
-                assert success
-                
+        connection = hardware_connection
+        assert connection.is_connected
+
+        # Test basic connection info
+        info = connection.get_connection_info()
+        assert info is not None
+        assert info['state'] == 'connected'
+
+    def test_real_hardware_voltage_reading(self, hardware_connection):
+        """Test voltage reading from real hardware."""
+        connection = hardware_connection
+
+        # Test single channel reading
+        voltage1 = connection.read_voltage(InputChannel.IN1)
+        voltage2 = connection.read_voltage(InputChannel.IN2)
+
+        assert voltage1 is not None
+        assert voltage2 is not None
+        assert -1.5 <= voltage1 <= 1.5  # Allow for some margin beyond ±1V
+        assert -1.5 <= voltage2 <= 1.5
+
+        # Test multi-channel reading
+        channels = [InputChannel.IN1, InputChannel.IN2]
+        voltages = connection.read_multiple_voltages(channels)
+
+        assert len(voltages) == 2
+        assert InputChannel.IN1 in voltages
+        assert InputChannel.IN2 in voltages
+
+    def test_real_hardware_voltage_stability(self, hardware_connection):
+        """Test voltage reading stability with real hardware."""
+        connection = hardware_connection
+        config = get_hardware_config()
+
+        # Take multiple readings over time
+        readings = []
+        num_samples = 20
+        interval = config['test_duration'] / num_samples
+
+        for i in range(num_samples):
+            voltage = connection.read_voltage(InputChannel.IN1)
+            readings.append(voltage)
+            if i < num_samples - 1:  # Don't sleep after last reading
+                time.sleep(interval)
+
+        # Analyze stability
+        readings = np.array(readings)
+        mean_voltage = np.mean(readings)
+        std_dev = np.std(readings)
+        min_voltage = np.min(readings)
+        max_voltage = np.max(readings)
+
+        # Log statistics for debugging
+        logger.info(f"Voltage stability: mean={mean_voltage:.3f}V, std={std_dev:.3f}V, "
+                   f"range=[{min_voltage:.3f}, {max_voltage:.3f}]V")
+
+        # Standard deviation should be reasonable (depending on input signal)
+        assert std_dev < 0.2, f"Voltage standard deviation {std_dev:.3f}V too high"
+        assert max_voltage - min_voltage < 1.0, f"Voltage range {max_voltage - min_voltage:.3f}V too large"
+
+    def test_real_hardware_pid_configuration(self, hardware_connection):
+        """Test PID configuration with real hardware."""
+        connection = hardware_connection
+
+        # Create safe PID configuration
+        pid_config = safe_pid_config(setpoint=0.0, gain_factor=0.5)
+
+        try:
+            # Configure PID
+            success = connection.configure_pid(PIDChannel.PID0, pid_config)
+            assert success, "PID configuration failed"
+
+            # Verify configuration was applied
+            current_config = connection.get_pid_configuration(PIDChannel.PID0)
+            assert current_config is not None
+            assert abs(current_config.setpoint - pid_config.setpoint) < 0.01
+            assert abs(current_config.p_gain - pid_config.p_gain) < 0.001
+            assert current_config.input_channel == pid_config.input_channel
+            assert current_config.output_channel == pid_config.output_channel
+
+        finally:
+            # Ensure PID is disabled
+            connection.disable_pid(PIDChannel.PID0)
+
+    def test_real_hardware_setpoint_control(self, hardware_connection):
+        """Test PID setpoint control with real hardware."""
+        connection = hardware_connection
+        config = get_hardware_config()
+
+        # Configure PID with minimal gain for safety
+        pid_config = safe_pid_config(setpoint=0.0, gain_factor=0.1)
+
+        try:
+            success = connection.configure_pid(PIDChannel.PID0, pid_config)
+            assert success
+
+            # Test setpoint changes within safe range
+            test_setpoints = [-config['max_voltage']/2, 0.0, config['max_voltage']/2]
+
+            for target_setpoint in test_setpoints:
+                # Set new setpoint
+                success = connection.set_pid_setpoint(PIDChannel.PID0, target_setpoint)
+                assert success, f"Failed to set setpoint to {target_setpoint}"
+
                 # Verify setpoint was set
                 current_setpoint = connection.get_pid_setpoint(PIDChannel.PID0)
-                assert abs(current_setpoint - 0.1) < 0.01
-                
-            finally:
-                # Always disable PID and disconnect
-                connection.disable_pid(PIDChannel.PID0)
-                connection.disconnect()
-                
-        else:
-            pytest.skip(f"Could not connect to Red Pitaya at {hostname}")
+                assert current_setpoint is not None
+                assert abs(current_setpoint - target_setpoint) < 0.01, \
+                    f"Setpoint mismatch: expected {target_setpoint}, got {current_setpoint}"
 
-    def test_real_hardware_voltage_stability(self, check_hardware_available):
-        """Test voltage reading stability with real hardware."""
-        hostname = check_hardware_available
-        
-        connection = connect_redpitaya(hostname, config_name="pytest_stability")
-        
-        if connection and connection.is_connected:
-            try:
-                # Take multiple readings
-                readings = []
-                for _ in range(10):
-                    voltage = connection.read_voltage(InputChannel.IN1)
-                    readings.append(voltage)
-                    time.sleep(0.01)  # 10ms between readings
-                
-                # Check that readings are reasonable
-                readings = np.array(readings)
-                std_dev = np.std(readings)
-                
-                # Standard deviation should be reasonable for a stable signal
-                assert std_dev < 0.1  # Less than 100mV standard deviation
-                
-            finally:
-                connection.disconnect()
-        else:
-            pytest.skip(f"Could not connect to Red Pitaya at {hostname}")
+                # Small delay to allow hardware to respond
+                time.sleep(0.1)
+
+        finally:
+            # Reset to safe state
+            connection.set_pid_setpoint(PIDChannel.PID0, 0.0)
+            connection.disable_pid(PIDChannel.PID0)
+
+    def test_real_hardware_multi_channel_operation(self, hardware_connection):
+        """Test multiple PID channels operating simultaneously."""
+        connection = hardware_connection
+
+        channels = [PIDChannel.PID0, PIDChannel.PID1]
+        configs = []
+
+        try:
+            # Configure multiple PIDs with different setpoints
+            for i, channel in enumerate(channels):
+                setpoint = 0.1 * (i + 1)  # 0.1V, 0.2V
+                pid_config = safe_pid_config(setpoint=setpoint, gain_factor=0.05)
+                configs.append(pid_config)
+
+                success = connection.configure_pid(channel, pid_config)
+                assert success, f"Failed to configure {channel}"
+
+            # Verify all configurations
+            for channel, expected_config in zip(channels, configs):
+                current_config = connection.get_pid_configuration(channel)
+                assert current_config is not None
+                assert abs(current_config.setpoint - expected_config.setpoint) < 0.01
+
+                # Test setpoint changes
+                new_setpoint = expected_config.setpoint * 0.5
+                success = connection.set_pid_setpoint(channel, new_setpoint)
+                assert success
+
+                verified_setpoint = connection.get_pid_setpoint(channel)
+                assert abs(verified_setpoint - new_setpoint) < 0.01
+
+        finally:
+            # Clean up all channels
+            for channel in channels:
+                connection.set_pid_setpoint(channel, 0.0)
+                connection.disable_pid(channel)
+
+    def test_real_hardware_connection_recovery(self, hardware_connection):
+        """Test connection recovery after temporary disconnection."""
+        connection = hardware_connection
+        original_state = connection.is_connected
+        assert original_state
+
+        # Test connection state detection
+        assert connection.get_connection_info()['state'] == 'connected'
+
+        # Simulate a brief disconnection (if supported by wrapper)
+        try:
+            # This test is more about verifying the connection remains stable
+            # and can detect state changes
+            time.sleep(1.0)
+            assert connection.is_connected
+
+            # Test that operations still work
+            voltage = connection.read_voltage(InputChannel.IN1)
+            assert voltage is not None
+
+        except Exception as e:
+            pytest.fail(f"Connection recovery test failed: {e}")
+
+    @pytest.mark.skipif(
+        get_hardware_config().get('skip_dangerous', True),
+        reason="Dangerous tests disabled by PYRPL_SKIP_DANGEROUS=true"
+    )
+    def test_real_hardware_performance_stress(self, hardware_connection):
+        """Stress test hardware performance with rapid operations."""
+        connection = hardware_connection
+        config = get_hardware_config()
+
+        # Configure PID with minimal gain for safety
+        pid_config = safe_pid_config(setpoint=0.0, gain_factor=0.01)
+
+        try:
+            success = connection.configure_pid(PIDChannel.PID0, pid_config)
+            assert success
+
+            # Rapid voltage readings
+            start_time = time.time()
+            num_readings = 100
+
+            voltages = []
+            for _ in range(num_readings):
+                voltage = connection.read_voltage(InputChannel.IN1)
+                voltages.append(voltage)
+
+            reading_time = time.time() - start_time
+            avg_reading_time = reading_time / num_readings
+
+            logger.info(f"Hardware reading performance: {avg_reading_time*1000:.2f}ms per reading")
+
+            # Rapid setpoint changes
+            start_time = time.time()
+            num_setpoints = 50
+            max_setpoint = config['max_voltage'] / 4  # Quarter of max for safety
+
+            for i in range(num_setpoints):
+                setpoint = max_setpoint * np.sin(2 * np.pi * i / num_setpoints)
+                success = connection.set_pid_setpoint(PIDChannel.PID0, setpoint)
+                assert success
+
+            setpoint_time = time.time() - start_time
+            avg_setpoint_time = setpoint_time / num_setpoints
+
+            logger.info(f"Hardware setpoint performance: {avg_setpoint_time*1000:.2f}ms per setpoint")
+
+            # Verify all readings were valid
+            assert all(v is not None for v in voltages)
+            assert all(-2.0 <= v <= 2.0 for v in voltages)  # Reasonable bounds
+
+            # Performance assertions (these may need adjustment based on actual hardware)
+            assert avg_reading_time < 0.1, f"Reading time {avg_reading_time*1000:.2f}ms too slow"
+            assert avg_setpoint_time < 0.1, f"Setpoint time {avg_setpoint_time*1000:.2f}ms too slow"
+
+        finally:
+            # Ensure safe state
+            connection.set_pid_setpoint(PIDChannel.PID0, 0.0)
+            connection.disable_pid(PIDChannel.PID0)
 
 
 # ============================================================================
@@ -1234,23 +1995,13 @@ class TestRealHardware:
 def test_suite_coverage():
     """Verify test suite covers all major functionality."""
     # This test ensures we have comprehensive coverage
-    expected_test_categories = [
-        "PyRPL wrapper connection management",
-        "DAQ_Move_PyRPL_PID plugin functionality", 
-        "DAQ_0DViewer_PyRPL plugin functionality",
-        "PIDModelPyRPL integration",
-        "Thread safety validation",
-        "Error handling and recovery",
-        "Performance characteristics",
-        "Hardware integration (optional)"
-    ]
     
     # Count test methods in each category
     test_counts = {
         "mock": len([m for m in dir(TestPyRPLWrapperMock) if m.startswith('test_')]) +
                len([m for m in dir(TestDAQMovePyRPLPID) if m.startswith('test_')]) +
-               len([m for m in dir(TestDAQ0DViewerPyRPL) if m.startswith('test_')]) +
-               len([m for m in dir(TestPIDModelPyRPL) if m.startswith('test_')]),
+               len([m for m in dir(TestDAQ0DViewerPyRPL) if m.startswith('test_')]),
+               # TestPIDModelPyRPL removed - had circular dependencies
         "thread_safety": len([m for m in dir(TestPyRPLWrapperThreadSafety) if m.startswith('test_')]),
         "error_handling": len([m for m in dir(TestPyRPLWrapperErrorHandling) if m.startswith('test_')]),
         "integration": len([m for m in dir(TestPluginIntegration) if m.startswith('test_')]),

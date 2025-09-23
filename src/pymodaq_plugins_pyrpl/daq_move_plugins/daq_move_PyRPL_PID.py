@@ -262,6 +262,22 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
 
     def close(self):
         """Terminate the communication protocol and clean up resources."""
+        # Always close native widgets if open
+        if self.native_pid_widget is not None:
+            try:
+                self.native_pid_widget.close()
+            except Exception:
+                pass
+            self.native_pid_widget = None
+
+        if self.transfer_function_widget is not None:
+            try:
+                self.transfer_function_widget.close()
+            except Exception:
+                pass
+            self.transfer_function_widget = None
+
+        # Only the master should manage hardware connection teardown
         if self.is_master and self.controller:
             try:
                 # Safely disable PID if it was enabled
@@ -799,36 +815,7 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
             logger.error(error_msg)
             self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
 
-    def close(self):
-        """
-        Close the plugin and cleanup resources.
 
-        This ensures proper cleanup of native widgets and PyRPL connections.
-        """
-        # Close native widgets if open
-        if self.native_pid_widget is not None:
-            try:
-                self.native_pid_widget.close()
-            except:
-                pass
-            self.native_pid_widget = None
-
-        if self.transfer_function_widget is not None:
-            try:
-                self.transfer_function_widget.close()
-            except:
-                pass
-            self.transfer_function_widget = None
-
-        # Disconnect from PyRPL
-        if self.controller and self.controller.is_connected:
-            try:
-                self.pyrpl_manager.disconnect(self.hostname)
-                logger.debug("Disconnected from PyRPL")
-            except Exception as e:
-                logger.warning(f"Error during PyRPL disconnect: {e}")
-
-        logger.debug("DAQ_Move_PyRPL_PID closed")
 
 
 if __name__ == '__main__':

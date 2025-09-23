@@ -366,6 +366,23 @@ class PyRPLConnection:
         with self._lock:
             return self._redpitaya
 
+    def get_pyrpl_instance(self) -> Optional[Any]:
+        """
+        Return the underlying pyrpl.Pyrpl instance for native widget access.
+
+        Returns:
+            The pyrpl.Pyrpl instance if connected; otherwise None.
+            In environments where PyRPL is unavailable or when operating without
+            a live connection (e.g., mock usage at plugin layer), this returns None.
+
+        Thread-safety:
+            This method is thread-safe and follows the class locking pattern.
+        """
+        with self._lock:
+            if not self.is_connected:
+                return None
+            return self._pyrpl
+
     def connect(self, status_callback: Optional[callable] = None) -> bool:
         """
         Establish connection to Red Pitaya.
@@ -388,9 +405,11 @@ class PyRPLConnection:
                 status_callback(ThreadCommand('Update_Status',
                     [f"Connecting to Red Pitaya at {self.hostname}", 'log']))
 
-            # Check if PyRPL is available
-            if not PYRPL_AVAILABLE or pyrpl is None:
-                error_msg = "PyRPL is not available - cannot establish connection"
+            # Attempt lazy import of PyRPL first. This will set PYRPL_AVAILABLE.
+            if not _lazy_import_pyrpl():
+                # _lazy_import_pyrpl already logs a warning if it fails.
+                # Here, we escalate it to an error for the connection context.
+                error_msg = "PyRPL is not available - lazy import failed. Cannot establish connection."
                 logger.error(error_msg)
                 self.state = ConnectionState.ERROR
                 self.last_error = error_msg
@@ -399,10 +418,6 @@ class PyRPLConnection:
             for attempt in range(self.retry_attempts):
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{self.retry_attempts} to {self.hostname}")
-
-                    # Import PyRPL lazily before using it
-                    if not _lazy_import_pyrpl():
-                        raise ImportError("PyRPL not available - lazy import failed")
                     
                     # Create PyRPL connection
                     self._pyrpl = pyrpl.Pyrpl(
@@ -695,6 +710,72 @@ class PyRPLConnection:
 
             except Exception as e:
                 logger.error(f"Failed to get setpoint for PID {channel.value}: {e}")
+                return None
+
+    def get_pid_configuration(self, channel: PIDChannel) -> Optional[PIDConfiguration]:
+        """
+        Read current PID configuration from hardware or cached state.
+
+        Returns:
+            PIDConfiguration or None on error/not connected.
+        """
+        with self._lock:
+            if not self.is_connected:
+                return None
+            try:
+                pid_module = self.get_pid_module(channel)
+                if pid_module is None:
+                    return None
+
+                # Prefer cached routing/limits if available (some backends may report 'off')
+                cached = self._pid_configs.get(channel)
+
+                # Gains and setpoint are always read from hardware
+                p_gain = getattr(pid_module, 'p', None)
+                i_gain = getattr(pid_module, 'i', None)
+                d_gain = getattr(pid_module, 'd', None)
+                setpoint = getattr(pid_module, 'setpoint', None)
+
+                # Route mapping with fallbacks to cached values if hardware reports unsupported values
+                in_val = getattr(pid_module, 'input', None)
+                out_val = getattr(pid_module, 'output_direct', None)
+
+                try:
+                    input_channel = InputChannel(in_val) if in_val in [e.value for e in InputChannel] else (
+                        cached.input_channel if cached else InputChannel.IN1
+                    )
+                except Exception:
+                    input_channel = cached.input_channel if cached else InputChannel.IN1
+
+                try:
+                    output_channel = OutputChannel(out_val) if out_val in [e.value for e in OutputChannel] else (
+                        cached.output_channel if cached else OutputChannel.OUT1
+                    )
+                except Exception:
+                    output_channel = cached.output_channel if cached else OutputChannel.OUT1
+
+                # Limits; fallback to cached if not present
+                vmin = getattr(pid_module, 'min_voltage', None)
+                vmax = getattr(pid_module, 'max_voltage', None)
+                voltage_limit_min = vmin if isinstance(vmin, (int, float)) else (cached.voltage_limit_min if cached else -1.0)
+                voltage_limit_max = vmax if isinstance(vmax, (int, float)) else (cached.voltage_limit_max if cached else 1.0)
+
+                enabled = (out_val in [e.value for e in OutputChannel]) if out_val is not None else (cached.enabled if cached else False)
+
+                # Build configuration object
+                return PIDConfiguration(
+                    setpoint=setpoint if isinstance(setpoint, (int, float)) else (cached.setpoint if cached else 0.0),
+                    p_gain=p_gain if isinstance(p_gain, (int, float)) else (cached.p_gain if cached else 0.1),
+                    i_gain=i_gain if isinstance(i_gain, (int, float)) else (cached.i_gain if cached else 0.0),
+                    d_gain=d_gain if isinstance(d_gain, (int, float)) else (cached.d_gain if cached else 0.0),
+                    input_channel=input_channel,
+                    output_channel=output_channel,
+                    voltage_limit_min=voltage_limit_min,
+                    voltage_limit_max=voltage_limit_max,
+                    enabled=enabled
+                )
+            except Exception as e:
+                logger.error(f"Failed to get PID configuration for {channel.value}: {e}")
                 return None
 
     def enable_pid(self, channel: PIDChannel) -> bool:
