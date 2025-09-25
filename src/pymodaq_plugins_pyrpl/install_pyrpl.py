@@ -40,7 +40,7 @@ def check_import(module_name):
 def apply_python312_fixes():
     """Apply Python 3.12 compatibility fixes to PyRPL."""
     import os
-    
+
     # Find PyRPL installation path without importing pyrpl
     try:
         # Get the Python packages directory
@@ -48,26 +48,27 @@ def apply_python312_fixes():
         site_packages = site.getsitepackages()[0]
         pyrpl_path = os.path.join(site_packages, 'pyrpl')
         memory_py = os.path.join(pyrpl_path, 'memory.py')
-        
+
+        # Fix 1: setInterval float issue
         if os.path.exists(memory_py):
             # Read the file
             with open(memory_py, 'r') as f:
                 content = f.read()
-            
+
             original_content = content
-            
-            # Apply fix for setInterval float issue  
+
+            # Apply fix for setInterval float issue
             content = content.replace(
                 'self._savetimer.setInterval(self._loadsavedeadtime*1000)',
                 'self._savetimer.setInterval(int(self._loadsavedeadtime*1000))'
             )
-            
+
             # Apply additional float->int fixes
             content = content.replace(
                 '.setInterval(self._loadsavedeadtime*1000)',
                 '.setInterval(int(self._loadsavedeadtime*1000))'
             )
-            
+
             if content != original_content:
                 # Write back the fixed file
                 with open(memory_py, 'w') as f:
@@ -77,7 +78,90 @@ def apply_python312_fixes():
                 print("✓ setInterval fix already applied or not needed")
         else:
             print("✓ PyRPL memory.py not found - fix may not be needed")
-            
+
+        # Fix 2: PyQtGraph GraphicsWindow compatibility (comprehensive fix)
+        # Fix all PyQtGraph GraphicsWindow references in PyRPL
+        files_to_fix = [
+            os.path.join(pyrpl_path, 'widgets', 'attribute_widgets.py'),
+            os.path.join(pyrpl_path, 'widgets', 'module_widgets', 'iir_widget.py')
+        ]
+
+        for file_path in files_to_fix:
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r') as f:
+                        content = f.read()
+
+                    original_content = content
+
+                    # Fix class definitions
+                    content = content.replace(
+                        'class DataWidget(pg.GraphicsWindow):',
+                        'class DataWidget(pg.GraphicsLayoutWidget):'
+                    )
+                    content = content.replace(
+                        'class MyGraphicsWindow(pg.GraphicsWindow):',
+                        'class MyGraphicsWindow(pg.GraphicsLayoutWidget):'
+                    )
+
+                    # Fix all GraphicsWindow references
+                    content = content.replace(
+                        'pg.GraphicsWindow',
+                        'pg.GraphicsLayoutWidget'
+                    )
+
+                    if content != original_content:
+                        with open(file_path, 'w') as f:
+                            f.write(content)
+                        print(f"✓ Applied PyQtGraph fix to {os.path.basename(file_path)}")
+                    else:
+                        print(f"✓ PyQtGraph fix already applied to {os.path.basename(file_path)}")
+                except Exception as e:
+                    print(f"⚠ Could not fix {file_path}: {e}")
+            else:
+                print(f"✓ {os.path.basename(file_path)} not found - may not need fix")
+
+        # Fix 3: NumPy complex deprecation compatibility
+        # Fix np.complex -> complex or np.complex128 in PyRPL files
+        numpy_fix_files = [
+            os.path.join(pyrpl_path, 'software_modules', 'spectrum_analyzer.py'),
+            os.path.join(pyrpl_path, 'software_modules', 'network_analyzer.py'),
+            os.path.join(pyrpl_path, 'test', 'test_hardware_modules', 'test_pid_na_iq.py'),
+            os.path.join(pyrpl_path, 'hardware_modules', 'pid.py'),
+            os.path.join(pyrpl_path, 'hardware_modules', 'iq.py'),
+            os.path.join(pyrpl_path, 'hardware_modules', 'iir', 'iir.py'),
+            os.path.join(pyrpl_path, 'hardware_modules', 'iir', 'iir_theory.py'),
+            os.path.join(pyrpl_path, 'widgets', 'module_widgets', 'iir_widget.py')
+        ]
+
+        for file_path in numpy_fix_files:
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r') as f:
+                        content = f.read()
+
+                    original_content = content
+
+                    # Fix np.complex to complex (for dtype and simple usage)
+                    # Be careful to not replace np.complex128 or np.complex64
+                    content = content.replace('dtype=np.complex', 'dtype=complex')
+                    content = content.replace('np.complex(', 'complex(')
+
+                    # Fix standalone np.complex references (but not np.complex128/64)
+                    import re
+                    content = re.sub(r'\bnp\.complex(?![0-9])', 'complex', content)
+
+                    if content != original_content:
+                        with open(file_path, 'w') as f:
+                            f.write(content)
+                        print(f"✓ Applied NumPy complex fix to {os.path.basename(file_path)}")
+                    else:
+                        print(f"✓ NumPy complex fix already applied to {os.path.basename(file_path)}")
+                except Exception as e:
+                    print(f"⚠ Could not fix {file_path}: {e}")
+            else:
+                print(f"✓ {os.path.basename(file_path)} not found - may not need fix")
+
     except Exception as e:
         print(f"⚠ Could not apply compatibility fixes: {e}")
         print("PyRPL may still work in mock mode")

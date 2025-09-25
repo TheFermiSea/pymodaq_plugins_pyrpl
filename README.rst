@@ -1,5 +1,6 @@
 
 PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
+=========================================================
 
 .. image:: https://img.shields.io/pypi/v/pymodaq_plugins_pyrpl.svg
    :target: https://pypi.org/project/pymodaq_plugins_pyrpl/
@@ -15,18 +16,11 @@ PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
 
 .. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
     :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
-=======
-.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/workflows/Upload%20Python%20Package/badge.svg
-   :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl
-   :alt: Publication Status
+    :alt: Test Status
 
-.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
-    :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
+**Complete Red Pitaya STEMlab integration for PyMoDAQ with hardware-validated functionality**
 
 This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ for advanced measurement and control applications. It leverages the PyRPL (Python Red Pitaya Lockbox) library to deliver a complete suite of hardware modules including PID control, signal generation, oscilloscope functionality, and lock-in amplifier capabilities - all combined with PyMoDAQ's powerful GUI, data logging, and scanning capabilities.
-
-This plugin is intended to recreate the PyRPL package in PyMoDAQ as a plugin.
-=======
 Key Features
 ============
 
@@ -39,9 +33,10 @@ Key Features
 * **Mock Mode**: Complete development and testing environment without physical hardware
 * **Comprehensive Testing**: 50+ automated tests covering all plugins and integration scenarios
 * **Professional Integration**: Production-ready solution for research and industrial applications
-* **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (rp-f08d6c.local, August 2025)
+* **✅ Hardware Validated & Recovered**: Complete system recovery and validation with real Red Pitaya hardware (rp-f08d6c.local, September 2025)
 * **Python 3.12 Compatible**: Full compatibility with modern Python/Qt environments including comprehensive PyRPL compatibility fixes
 * **PyRPL Integration Fixed**: Resolved all Python 3.12 compatibility issues (collections.Mapping, np.complex, Qt timer fixes)
+* **Recovery Expertise**: Includes tools and procedures for Red Pitaya system recovery from corruption
 
 Plugin Components
 =================
@@ -221,17 +216,14 @@ Network Configuration
 
 4. **PyRPL Connection**: The plugin uses PyRPL's SSH-based connection (port 22), not SCPI
 
-   **Hardware Validation (August 2025)**: Successfully validated with real Red Pitaya hardware:
-   
-   - ✅ Tested with Red Pitaya STEMlab at rp-f08d6c.local
-   - ✅ All 5 plugin types working: PID, ASG, Scope, IQ, Voltage Monitor
-   - ✅ Real-time data acquisition and control confirmed
-   - ✅ Python 3.12 + PyQt5 compatibility established
-   - ✅ PyRPL compatibility fixes implemented:
-     - collections.Mapping deprecation fixed
-     - np.complex deprecation handled
-     - Qt timer float/int compatibility resolved
-     - ZeroDivisionError handling for PyRPL quirks
+   **Hardware Validation & Recovery (September 2025)**: Complete system recovery and validation:
+
+   - ✅ **Recovery Success**: Red Pitaya recovered from Ubuntu "unminimize" corruption
+   - ✅ **Hardware Operational**: Red Pitaya STEMlab fully functional at rp-f08d6c.local
+   - ✅ **All Plugin Types Working**: PID, ASG, Scope, IQ, Voltage Monitor (6 plugins total)
+   - ✅ **Real-time Validation**: Data acquisition, control, and FPGA communication confirmed
+   - ✅ **Python 3.12 + PyQt5**: Full compatibility with modern environments established
+   - ✅ **PyRPL Fixes Applied**: All compatibility issues resolved (Mapping, np.complex, setInterval)
 
 Physical Connections
 ++++++++++++++++++++
@@ -345,15 +337,33 @@ Plugin Configuration
 
 **Hardware Testing Status**
 
-✅ **HARDWARE VALIDATED** (August 2025)
+✅ **HARDWARE VALIDATED & RECOVERY COMPLETE** (September 2025)
 
-All plugins have been successfully tested with real Red Pitaya hardware:
+All plugins have been successfully tested with real Red Pitaya hardware including complete system recovery:
 
-- **PyRPL Library**: Full compatibility achieved with Python 3.12/Qt6
-- **Hardware Connection**: Verified at IP rp-f08d6c.local  
-- **All Modules Tested**: PID, ASG, Scope, IQ, Sampler - all operational
-- **Network Configuration**: Complete USB serial setup guide included
-- **Compatibility Fixes**: All Python 3.10+ and Qt6 issues resolved
+**Recovery Achievement:**
+- **System Corruption Recovery**: Successfully recovered from Ubuntu "unminimize" corruption
+- **Library Repair**: Rebuilt corrupted `librp-hw-profiles.so` from static archive
+- **SD Card Re-flash**: Completed full system restoration with fresh Red Pitaya OS
+
+**Compatibility Validation:**
+- **PyRPL Library**: Full compatibility achieved with Python 3.12 + PyQt5/6
+- **Python 3.12 Fixes**: Resolved all compatibility issues:
+  - `collections.Mapping` → `collections.abc.Mapping`
+  - `np.complex` → `complex` (NumPy deprecation)
+  - Qt timer `setInterval(float)` → `setInterval(int)` conversion
+- **Hardware Connection**: Verified operational at IP rp-f08d6c.local
+- **FPGA Communication**: Full register access and bitstream loading confirmed
+
+**Hardware Modules Validated:**
+- **PID Controllers**: 3 channels (pid0, pid1, pid2) - setpoint control operational
+- **Signal Generators**: 2 ASG channels (asg0, asg1) - frequency/amplitude control working
+- **Oscilloscope**: 2-channel, 125 MS/s acquisition with decimation control
+- **Lock-in Amplifiers**: 3 IQ modules (iq0, iq1, iq2) - phase-sensitive detection ready
+- **Voltage Monitoring**: Real-time ±1V sampling confirmed
+- **PyMoDAQ Integration**: All 6 plugin types loading and operational
+
+**System Status**: Production-ready for research and industrial measurement applications
 
 Mock Mode for Development
 +++++++++++++++++++++++++
@@ -573,6 +583,86 @@ Performance Optimization
 * Minimize sampling rates for viewer plugins when not needed
 * Use appropriate P, I, D gains for your specific system
 * Consider network latency in your control loop design
+
+Red Pitaya Recovery Procedures
+==============================
+
+This plugin includes comprehensive tools and procedures for recovering Red Pitaya systems from corruption or malfunction.
+
+**Recovery Scenarios Supported:**
+
+* **Ubuntu "unminimize" Corruption**: Complete recovery from storage and library corruption
+* **FPGA Communication Loss**: Restore FPGA bitstream and register access
+* **Corrupted System Libraries**: Rebuild shared libraries from static archives
+* **Network Configuration Issues**: Restore SSH and network connectivity
+
+**Recovery Tools Included:**
+
+**System Recovery Scripts:**
+
+.. code-block:: bash
+
+   # Quick system recovery test
+   python test_recovery.py
+
+   # Comprehensive hardware validation
+   python test_hardware_final.py
+
+   # Manual recovery procedures (run sections via SSH)
+   ./fix_red_pitaya_unminimize.sh
+
+**Recovery Procedures:**
+
+1. **SD Card Re-flash** (Recommended for severe corruption):
+
+   - Download fresh Red Pitaya OS image
+   - Flash to SD card using Balena Etcher or similar
+   - Boot and verify basic functionality
+
+2. **Library Repair** (For corrupted shared libraries):
+
+   .. code-block:: bash
+
+      # SSH into Red Pitaya (password: root)
+      ssh root@rp-f08d6c.local
+
+      # Check for corrupted libraries
+      ls -la /opt/redpitaya/lib/librp-hw-profiles.so
+
+      # Rebuild from static archive if corrupted
+      cd /tmp
+      ar x /opt/redpitaya/lib/librp-hw-profiles.a
+      gcc -shared -fPIC -o librp-hw-profiles.so *.o
+      cp librp-hw-profiles.so /opt/redpitaya/lib/
+      chmod +x /opt/redpitaya/lib/librp-hw-profiles.so
+
+3. **FPGA Validation** (Test hardware communication):
+
+   .. code-block:: bash
+
+      # Test FPGA register access
+      ssh root@rp-f08d6c.local "/opt/redpitaya/bin/monitor 0x40000000"
+
+      # Should return: 0x00000001 (FPGA working)
+
+4. **PyRPL Compatibility** (Ensure Python 3.12 compatibility):
+
+   .. code-block:: bash
+
+      # Apply PyRPL fixes automatically
+      uv run python src/pymodaq_plugins_pyrpl/install_pyrpl.py
+
+**Recovery Success Indicators:**
+
+* FPGA register access working (`monitor 0x40000000` returns `0x00000001`)
+* PyRPL can connect without timeout errors
+* Hardware modules (ASG, PID, Scope) respond to commands
+* Voltage monitoring returns stable readings
+
+**Expert Recovery Support:**
+
+The development of this plugin included successful recovery of a severely corrupted Red Pitaya system,
+providing real-world validation of these procedures. All recovery tools and scripts are included in the repository.
 
 Safety Considerations
 =====================
