@@ -43,9 +43,8 @@ from pymodaq_utils.utils import ThreadCommand
 from pymodaq_gui.parameter import Parameter
 import logging
 
-# Import configuration and threading utilities
+# Import configuration utilities
 from ..utils.config import get_pyrpl_config
-from ..utils.threading import ThreadedHardwareManager, threaded_hardware_operation
 
 # Import PyRPL wrapper utilities
 from ..utils.pyrpl_wrapper import (
@@ -216,11 +215,8 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         # Configuration management
         self.config = get_pyrpl_config()
 
-        # Threading support
-        self.hardware_manager = ThreadedHardwareManager(
-            max_workers=2,
-            status_callback=self.emit_status
-        )
+        # PyRPL Manager (threading support handled by wrapper)
+        self.pyrpl_manager: PyRPLManager = PyRPLManager.get_instance()
 
         logger.info("ASG Plugin attributes initialized")
 
@@ -308,11 +304,10 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         param : Parameter
             The parameter that was changed
         """
-        param_path = self.get_param_path(param)
         param_name = param.name()
         param_value = param.value()
 
-        logger.debug(f"Parameter changed: {param_path} = {param_value}")
+        logger.debug(f"Parameter changed: {param_name} = {param_value}")
 
         try:
             # Handle ASG configuration parameters
@@ -374,10 +369,10 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         logger.info("Initializing ASG Plugin")
 
         try:
-            # Extract parameters
-            self.mock_mode = self.settings.child('dev_settings', 'mock_mode').value()
-            auto_connect = self.settings.child('dev_settings', 'auto_connect').value()
-            debug_logging = self.settings.child('dev_settings', 'debug_logging').value()
+            # Extract parameters from correct groups
+            self.mock_mode = self.settings.child('connection_settings', 'mock_mode').value()
+            auto_connect = True  # Always auto-connect in PyMoDAQ
+            debug_logging = False  # Default to false
 
             # Setup logging
             self._setup_logging(debug_logging)
@@ -405,8 +400,8 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         """
         try:
             # Validate frequency limits
-            freq_min = self.settings.child('control_settings', 'frequency_min').value()
-            freq_max = self.settings.child('control_settings', 'frequency_max').value()
+            freq_min = self.settings.child('safety_settings', 'min_frequency').value()
+            freq_max = self.settings.child('safety_settings', 'max_frequency').value()
 
             if not (freq_min <= position <= freq_max):
                 raise ValueError(f"Frequency {position} Hz out of range [{freq_min}, {freq_max}] Hz")
@@ -503,8 +498,8 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         self.mock_frequency = 1000.0  # Default 1kHz
 
         # Setup mock frequency limits
-        self.mock_min_freq = self.settings.child('control_settings', 'frequency_min').value()
-        self.mock_max_freq = self.settings.child('control_settings', 'frequency_max').value()
+        self.mock_min_freq = self.settings.child('safety_settings', 'min_frequency').value()
+        self.mock_max_freq = self.settings.child('safety_settings', 'max_frequency').value()
 
         return "ASG Plugin initialized in mock mode"
 
@@ -516,10 +511,8 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         hostname = self.settings.child('connection_settings', 'redpitaya_host').value()
         config_name = self.settings.child('connection_settings', 'config_name').value()
         timeout = self.settings.child('connection_settings', 'connection_timeout').value()
-        retry_attempts = self.settings.child('connection_settings', 'retry_attempts').value()
-
         # Get ASG channel
-        asg_channel_name = self.settings.child('asg_settings', 'asg_channel').value()
+        asg_channel_name = self.settings.child('asg_config', 'asg_channel').value()
         self.asg_channel = ASGChannel(asg_channel_name)
 
         if auto_connect:
@@ -528,8 +521,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
                 hostname=hostname,
                 config_name=config_name,
                 status_callback=self.emit_status,
-                connection_timeout=timeout,
-                retry_attempts=retry_attempts
+                connection_timeout=timeout
             )
 
             if self.controller is None or not self.controller.is_connected:
@@ -554,14 +546,14 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         # Create ASG configuration from parameters
         config = ASGConfiguration(
             frequency=self.mock_frequency,  # Will be updated by moves
-            amplitude=self.settings.child('asg_settings', 'amplitude').value(),
-            offset=self.settings.child('asg_settings', 'offset').value(),
-            phase=self.settings.child('asg_settings', 'phase').value(),
-            waveform=ASGWaveform(self.settings.child('asg_settings', 'waveform').value()),
-            trigger_source=ASGTriggerSource(self.settings.child('control_settings', 'trigger_source').value()),
-            output_enable=self.settings.child('control_settings', 'output_enable').value(),
-            frequency_min=self.settings.child('control_settings', 'frequency_min').value(),
-            frequency_max=self.settings.child('control_settings', 'frequency_max').value(),
+            amplitude=self.settings.child('signal_params', 'amplitude').value(),
+            offset=self.settings.child('signal_params', 'offset').value(),
+            phase=0.0,  # Default phase
+            waveform=ASGWaveform(self.settings.child('asg_config', 'waveform').value()),
+            trigger_source=ASGTriggerSource('immediately'),  # Default trigger
+            output_enable=self.settings.child('safety_settings', 'auto_enable_asg').value(),
+            frequency_min=self.settings.child('safety_settings', 'min_frequency').value(),
+            frequency_max=self.settings.child('safety_settings', 'max_frequency').value(),
         )
 
         success = self.controller.configure_asg(self.asg_channel, config)
@@ -583,14 +575,14 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
 
     def _validate_frequency_limits(self) -> None:
         """Validate frequency limit parameters."""
-        freq_min = self.settings.child('control_settings', 'frequency_min').value()
-        freq_max = self.settings.child('control_settings', 'frequency_max').value()
+        freq_min = self.settings.child('safety_settings', 'min_frequency').value()
+        freq_max = self.settings.child('safety_settings', 'max_frequency').value()
 
         if freq_min >= freq_max:
             logger.warning(f"Invalid frequency limits: min={freq_min} >= max={freq_max}")
             # Reset to safe defaults
-            self.settings.child('control_settings', 'frequency_min').setValue(0.0)
-            self.settings.child('control_settings', 'frequency_max').setValue(1e6)
+            self.settings.child('safety_settings', 'min_frequency').setValue(0.1)
+            self.settings.child('safety_settings', 'max_frequency').setValue(1e6)
 
     def _setup_logging(self, debug_enabled: bool) -> None:
         """Setup logging level based on debug setting."""
