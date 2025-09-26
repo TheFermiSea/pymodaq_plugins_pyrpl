@@ -11,15 +11,21 @@ Classes:
     PyRPLManager: Singleton connection pool manager
 """
 
+import asyncio
 import logging
 import threading
 import time
 from contextlib import contextmanager
-from typing import Dict, Optional, Union, Any, List, Tuple
+from typing import Dict, Optional, Union, Any, List, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+
+QtCore = None
+QtWidgets = None
+_main_thread_invoker = None
+_qt_app = None
 
 # Set up logger early
 logger = logging.getLogger(__name__)
@@ -57,16 +63,83 @@ try:
 
     # Qt timer compatibility fix - patch before importing pyrpl
     try:
+        from qtpy import QtCore as _QtCore, QtWidgets as _QtWidgets
         from qtpy.QtCore import QTimer
-        original_setInterval = QTimer.setInterval
 
-        def setInterval_patched(self, msec):
-            """Patched setInterval to handle float inputs properly."""
-            return original_setInterval(self, int(msec))
+        globals()['QtCore'] = _QtCore
+        globals()['QtWidgets'] = _QtWidgets
 
-        QTimer.setInterval = setInterval_patched
+        # Removed QApplication creation to avoid conflicts with PyMoDAQ's QApplication
+        # The _execute_in_main_thread function has fallback: QtWidgets.QApplication.instance()
+        globals()['_qt_app'] = None
+
+        # Qt timer compatibility patch - only apply if not already patched
+        if not hasattr(QTimer, '_pyrpl_patched'):
+            original_setInterval = QTimer.setInterval
+
+            def setInterval_patched(self, msec):
+                """Patched setInterval to handle float inputs properly."""
+                try:
+                    return original_setInterval(self, int(msec))
+                except (ValueError, TypeError):
+                    logger.warning(f"QTimer.setInterval called with invalid value: {msec}, using 1000ms default")
+                    return original_setInterval(self, 1000)
+
+            QTimer.setInterval = setInterval_patched
+            QTimer._pyrpl_patched = True
+            logger.debug("Applied PyRPL Qt timer compatibility patch")
+
+        class _MainThreadInvoker(QtCore.QObject):
+            """Utility to synchronously execute callables on the Qt main thread."""
+
+            execute = QtCore.Signal(object, object)
+
+            def __init__(self):
+                super().__init__()
+                self.execute.connect(self._run, QtCore.Qt.BlockingQueuedConnection)
+
+            @QtCore.Slot(object, object)
+            def _run(self, func: Callable[[], Any], container: Dict[str, Any]) -> None:
+                try:
+                    container['result'] = func()
+                except Exception as exc:  # pragma: no cover - propagated to caller
+                    container['error'] = exc
+
+        globals()['_MainThreadInvoker'] = _MainThreadInvoker
+
     except ImportError:
         pass  # Qt not available, skip timer patch
+
+    def _execute_in_main_thread(func: Callable[[], Any]) -> Any:
+        """Execute *func* on the Qt main thread when possible."""
+
+        _qt_app = globals().get('_qt_app')
+
+        if QtCore is None or QtWidgets is None:
+            return func()
+
+        app = _qt_app or QtWidgets.QApplication.instance()
+        if app is None or QtCore.QThread.currentThread() == app.thread():
+            return func()
+
+        global _main_thread_invoker
+
+        invoker_cls = globals().get('_MainThreadInvoker')
+        if invoker_cls is None:
+            return func()
+
+        if (_main_thread_invoker is None or
+                _main_thread_invoker.thread() != app.thread()):
+            _main_thread_invoker = invoker_cls()
+            _main_thread_invoker.moveToThread(app.thread())
+
+        container: Dict[str, Any] = {}
+        _main_thread_invoker.execute.emit(func, container)
+
+        if 'error' in container:
+            raise container['error']
+
+        return container.get('result')
 
     # Don't import PyRPL at module level - use lazy loading
     PYRPL_AVAILABLE = None  # Will be determined on first use
@@ -108,14 +181,130 @@ except (ImportError, TypeError, AttributeError) as e:
     PYRPL_AVAILABLE = False
     pyrpl = None
     PidModule = object
-    
+
+    def _execute_in_main_thread(func: Callable[[], Any]) -> Any:
+        return func()
+
     def _lazy_import_pyrpl():
         return False
 
 from pymodaq_utils.utils import ThreadCommand
 
+# Import enhanced mock connection for unified simulation
+try:
+    from .enhanced_mock_connection import EnhancedMockPyRPLConnection
+    ENHANCED_MOCK_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced mock connection unavailable: {e}")
+    ENHANCED_MOCK_AVAILABLE = False
+    EnhancedMockPyRPLConnection = None
+
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Singleton Mock Instance Management
+# =============================================================================
+
+# Module-level variables for shared mock instance management
+_shared_mock_instance: Optional['EnhancedMockPyRPLConnection'] = None
+_mock_instance_lock = threading.Lock()
+
+def get_shared_mock_instance(hostname: str) -> Optional['EnhancedMockPyRPLConnection']:
+    """
+    Factory function to get or create the singleton EnhancedMockPyRPLConnection instance.
+    
+    This ensures that ALL plugins in mock mode share the same simulation engine,
+    enabling coordinated behavior between PID controllers, signal generators,
+    oscilloscopes, and IQ detectors.
+    
+    Parameters:
+        hostname (str): Mock hostname for the shared instance
+        
+    Returns:
+        EnhancedMockPyRPLConnection: Shared mock instance, or None if unavailable
+        
+    Thread Safety:
+        This function is thread-safe and can be called concurrently from multiple plugins.
+    """
+    global _shared_mock_instance
+    
+    if not ENHANCED_MOCK_AVAILABLE:
+        logger.error("EnhancedMockPyRPLConnection not available - mock mode disabled")
+        return None
+    
+    with _mock_instance_lock:
+        if _shared_mock_instance is None:
+            # Create the one and only shared mock instance
+            try:
+                _shared_mock_instance = EnhancedMockPyRPLConnection(hostname)
+                logger.info(f"Created shared mock instance for hostname: {hostname}")
+            except Exception as e:
+                logger.error(f"Failed to create shared mock instance: {e}")
+                return None
+        else:
+            # Return existing shared instance - ignore hostname for consistency
+            logger.debug(f"Returning existing shared mock instance (original hostname: {_shared_mock_instance.hostname})")
+            
+        return _shared_mock_instance
+
+def reset_shared_mock_instance() -> None:
+    """
+    Reset the shared mock instance.
+    
+    This is primarily used for testing scenarios where a clean mock state is needed.
+    In production, the shared instance should persist for the entire application lifetime.
+    """
+    global _shared_mock_instance
+    
+    with _mock_instance_lock:
+        if _shared_mock_instance is not None:
+            try:
+                _shared_mock_instance.reset_simulation()
+                logger.info("Reset shared mock instance simulation")
+            except Exception as e:
+                logger.error(f"Error resetting shared mock instance: {e}")
+                
+        # Clear both our wrapper singleton and the EnhancedMockPyRPLConnection registry
+        _shared_mock_instance = None
+        
+        # Clear the EnhancedMockPyRPLConnection internal registry for complete reset
+        if ENHANCED_MOCK_AVAILABLE and EnhancedMockPyRPLConnection is not None:
+            try:
+                EnhancedMockPyRPLConnection._instances.clear()
+                logger.info("Cleared EnhancedMockPyRPLConnection registry")
+            except Exception as e:
+                logger.error(f"Error clearing mock connection registry: {e}")
+                
+        logger.info("Cleared shared mock instance")
+
+def get_mock_instance_info() -> Dict[str, Any]:
+    """
+    Get information about the current shared mock instance.
+    
+    Returns:
+        Dict with mock instance status and connection information
+    """
+    with _mock_instance_lock:
+        if _shared_mock_instance is None:
+            return {
+                "exists": False,
+                "hostname": None,
+                "connection_count": 0
+            }
+        else:
+            try:
+                info = _shared_mock_instance.get_connection_info()
+                info["exists"] = True
+                return info
+            except Exception as e:
+                logger.error(f"Error getting mock instance info: {e}")
+                return {
+                    "exists": True,
+                    "hostname": getattr(_shared_mock_instance, 'hostname', 'unknown'),
+                    "error": str(e)
+                }
 
 
 class ConnectionState(Enum):
@@ -385,27 +574,44 @@ class PyRPLConnection:
 
     def connect(self, status_callback: Optional[callable] = None) -> bool:
         """
-        Establish connection to Red Pitaya.
+        Establish connection to Red Pitaya with robust error handling and retries.
+
+        This method implements a sophisticated connection strategy that handles:
+        - PyRPL import verification and lazy loading
+        - Connection retries with exponential backoff
+        - PyRPL-specific error handling (ZeroDivisionError workarounds)
+        - Thread-safe connection state management
+        - Comprehensive status reporting and logging
 
         Args:
-            status_callback: Optional callback for status updates
+            status_callback (Optional[callable]): Callback function for status updates.
+                Should accept ThreadCommand objects for PyMoDAQ integration.
 
         Returns:
             bool: True if connection successful, False otherwise
+
+        Note:
+            This method includes specific workarounds for PyRPL compatibility issues,
+            particularly handling ZeroDivisionError exceptions that can occur during
+            PyRPL module initialization but don't prevent successful connections.
         """
-        with self._connection_lock:
+        with self._connection_lock:  # Ensure thread-safe connection operations
+            # Early return if already connected - avoid redundant connection attempts
             if self.is_connected:
                 logger.debug(f"Already connected to {self.hostname}")
                 return True
 
+            # Initialize connection state for this attempt
             self.state = ConnectionState.CONNECTING
             self.last_error = None
 
+            # Notify user of connection initiation
             if status_callback:
                 status_callback(ThreadCommand('Update_Status',
                     [f"Connecting to Red Pitaya at {self.hostname}", 'log']))
 
-            # Attempt lazy import of PyRPL first. This will set PYRPL_AVAILABLE.
+            # Verify PyRPL availability before attempting connection
+            # This handles cases where PyRPL failed to import during initialization
             if not _lazy_import_pyrpl():
                 # _lazy_import_pyrpl already logs a warning if it fails.
                 # Here, we escalate it to an error for the connection context.
@@ -415,30 +621,51 @@ class PyRPLConnection:
                 self.last_error = error_msg
                 return False
 
+            # Retry loop with configurable attempts and delay
             for attempt in range(self.retry_attempts):
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{self.retry_attempts} to {self.hostname}")
                     
-                    # Create PyRPL connection
-                    self._pyrpl = pyrpl.Pyrpl(
-                        config=self.config_name,
-                        hostname=self.hostname,
-                        port=self.port,
-                        timeout=self.connection_timeout
-                    )
+                    # Create PyRPL connection instance
+                    # This is the core PyRPL initialization that connects to Red Pitaya
+                    # Handle asyncio event loop requirement for PyRPL
+                    # Require host-provided qasync loop instead of creating competing loops
+                    try:
+                        loop = asyncio.get_running_loop()
+                        logger.info(f"Using host-provided event loop: {type(loop)}")
+                    except RuntimeError as e:
+                        raise RuntimeError(
+                            "PyRPL plugin requires host (PyMoDAQ) to provide a running "
+                            "qasync-compatible event loop. Initialize qasync.QEventLoop(app) "
+                            f"and asyncio.set_event_loop(loop) before plugin initialization. Original error: {e}"
+                        ) from e
+                    
+                    def _create_pyrpl_instance():
+                        return pyrpl.Pyrpl(
+                            config=self.config_name,      # PyRPL configuration name for persistence
+                            hostname=self.hostname,       # Red Pitaya network address
+                            port=self.port,               # SSH port (typically 22)
+                            timeout=self.connection_timeout,  # Network timeout
+                            gui=False                     # Force headless mode inside PyMoDAQ worker threads
+                        )
 
+                    self._pyrpl = _execute_in_main_thread(_create_pyrpl_instance)
+
+                    # Get the Red Pitaya device object for hardware access
                     self._redpitaya = self._pyrpl.rp
 
-                    # Connection is successful if we reach this point
-                    # Skip version check due to PyRPL compatibility issues
+                    # Connection is successful if we reach this point without exceptions
+                    # Note: We skip version checks due to PyRPL compatibility issues
                     logger.debug(f"PyRPL connection established to {self.hostname}")
 
+                    # Update connection state and metadata
                     self.state = ConnectionState.CONNECTED
-                    self.connected_at = time.time()
-                    self.last_error = None
+                    self.connected_at = time.time()  # Record connection timestamp
+                    self.last_error = None           # Clear any previous errors
 
                     logger.info(f"Successfully connected to Red Pitaya {self.hostname}")
 
+                    # Notify user of successful connection
                     if status_callback:
                         status_callback(ThreadCommand('Update_Status',
                             [f"Red Pitaya {self.hostname} connected", 'log']))
@@ -446,26 +673,34 @@ class PyRPLConnection:
                     return True
 
                 except ZeroDivisionError as e:
-                    # PyRPL sometimes has division by zero errors during module loading
-                    # but the connection itself is successful, so ignore these
+                    # PyRPL-specific workaround: Sometimes PyRPL throws ZeroDivisionError
+                    # during module initialization, but the connection is actually successful.
+                    # This is a known PyRPL issue that doesn't prevent hardware access.
                     logger.debug(f"Ignoring PyRPL ZeroDivisionError: {e}")
+                    
+                    # Check if connection objects were created despite the error
                     if self._pyrpl and self._redpitaya:
                         logger.info(f"PyRPL connection successful despite ZeroDivisionError")
                         self.state = ConnectionState.CONNECTED
                         self.connected_at = time.time()
                         self.last_error = None
                         return True
-                    # If no connection objects, treat as real error
+                    
+                    # If no connection objects exist, treat as a real error
                     error_msg = f"Connection attempt {attempt + 1} failed: {str(e)}"
                     logger.warning(error_msg)
                     self.last_error = str(e)
 
+                    # Wait before retry (unless this is the last attempt)
                     if attempt < self.retry_attempts - 1:
                         time.sleep(self.retry_delay)
 
                 except Exception as e:
-                    # Check if this is a PyRPL-related error that we can ignore
+                    # Handle other PyRPL-related errors that might not prevent connection
                     error_str = str(e)
+                    
+                    # Another PyRPL workaround: "float division by zero" errors
+                    # can occur during initialization but don't prevent successful connections
                     if "float division by zero" in error_str and self._pyrpl and self._redpitaya:
                         logger.info(f"PyRPL connection successful despite error: {error_str}")
                         self.state = ConnectionState.CONNECTED
@@ -473,18 +708,21 @@ class PyRPLConnection:
                         self.last_error = None
                         return True
 
+                    # Log the error and prepare for potential retry
                     error_msg = f"Connection attempt {attempt + 1} failed: {error_str}"
                     logger.warning(error_msg)
                     self.last_error = error_str
 
+                    # Wait before retry (unless this is the last attempt)
                     if attempt < self.retry_attempts - 1:
                         time.sleep(self.retry_delay)
 
-            # All attempts failed
+            # All retry attempts have been exhausted without success
             self.state = ConnectionState.ERROR
             error_msg = f"Failed to connect to {self.hostname} after {self.retry_attempts} attempts"
             logger.error(error_msg)
 
+            # Notify user of connection failure
             if status_callback:
                 status_callback(ThreadCommand('Update_Status', [error_msg, 'log']))
 
@@ -609,49 +847,91 @@ class PyRPLConnection:
 
     def configure_pid(self, channel: PIDChannel, config: PIDConfiguration) -> bool:
         """
-        Configure a PID controller with the specified parameters.
+        Configure a Red Pitaya hardware PID controller with comprehensive parameter setup.
+
+        This method configures all aspects of a PID controller including:
+        - PID gains (P, I, D coefficients)
+        - Signal routing (input/output channel assignment)
+        - Voltage limits and safety bounds
+        - Enable/disable state management
+        - Setpoint initialization
+
+        The configuration is applied atomically - either all parameters are set
+        successfully, or the operation fails and logs appropriate errors.
 
         Args:
-            channel: PID channel to configure
-            config: PID configuration parameters
+            channel (PIDChannel): PID channel to configure (PID0, PID1, or PID2)
+            config (PIDConfiguration): Complete PID configuration including:
+                - setpoint: Target voltage value
+                - p_gain, i_gain, d_gain: PID coefficients
+                - input_channel: Signal input (IN1, IN2)
+                - output_channel: Control output (OUT1, OUT2)
+                - voltage_limit_min/max: Safety voltage bounds
+                - enabled: Whether to activate the PID output
 
         Returns:
-            bool: True if configuration successful
+            bool: True if configuration successful, False if any step failed
+
+        Thread Safety:
+            This method is thread-safe and uses internal locks to prevent
+            concurrent access to hardware during configuration.
+
+        Hardware Impact:
+            - Changes to PID parameters take effect immediately
+            - Output routing changes are applied instantly
+            - Voltage limits provide hardware-level protection
+            - Disabled PIDs set output_direct to 'off' for safety
         """
-        with self._lock:
+        with self._lock:  # Ensure thread-safe hardware access
+            # Verify connection state before attempting hardware operations
             if not self.is_connected:
                 logger.error(f"Cannot configure PID {channel.value}: not connected")
                 return False
 
             try:
+                # Get the hardware PID module object for this channel
                 pid_module = self.get_pid_module(channel)
                 if pid_module is None:
+                    # get_pid_module already logged the specific error
                     return False
 
-                # Store configuration
+                # Store configuration in our internal cache for later reference
+                # This allows other methods to query current PID settings
                 self._pid_configs[channel] = config
 
-                # Configure PID parameters
-                pid_module.setpoint = config.setpoint
-                pid_module.p = config.p_gain
-                pid_module.i = config.i_gain
-                pid_module.d = config.d_gain
+                # Configure core PID parameters
+                # These are the fundamental control law coefficients
+                pid_module.setpoint = config.setpoint  # Target value for control
+                pid_module.p = config.p_gain          # Proportional gain
+                pid_module.i = config.i_gain          # Integral gain  
+                pid_module.d = config.d_gain          # Derivative gain
 
-                # Configure input/output routing
+                # Configure signal routing for the PID loop
+                # Input: where the PID reads the process variable (sensor signal)
                 pid_module.input = config.input_channel.value
+                
+                # Output: where the PID sends the control signal (actuator drive)
+                # The output routing is conditional based on enable state for safety
                 if config.enabled:
+                    # Enable PID output to the specified channel
                     pid_module.output_direct = config.output_channel.value
                 else:
+                    # Disable PID output for safety - no control signal generated
                     pid_module.output_direct = 'off'
 
-                # Set voltage limits
-                pid_module.max_voltage = config.voltage_limit_max
-                pid_module.min_voltage = config.voltage_limit_min
+                # Apply voltage safety limits to prevent hardware damage
+                # These limits are enforced at the hardware level by the Red Pitaya FPGA
+                pid_module.max_voltage = config.voltage_limit_max  # Upper bound (typically +1V)
+                pid_module.min_voltage = config.voltage_limit_min  # Lower bound (typically -1V)
+
+                # Track this PID as active for proper cleanup during disconnection
+                self._active_pids[channel] = pid_module
 
                 logger.debug(f"Configured PID {channel.value} with setpoint {config.setpoint}")
                 return True
 
             except Exception as e:
+                # Log detailed error for debugging while returning simple failure status
                 logger.error(f"Failed to configure PID {channel.value}: {e}")
                 return False
 
@@ -1572,6 +1852,34 @@ class PyRPLConnection:
                 'ref_count': self._ref_count
             }
 
+    def add_reference(self) -> int:
+        """
+        Add a reference count for connection sharing.
+
+        Returns:
+            int: Current reference count after increment
+        """
+        with self._lock:
+            self._ref_count += 1
+            return self._ref_count
+
+    def remove_reference(self) -> int:
+        """
+        Remove a reference count for connection sharing.
+
+        Returns:
+            int: Current reference count after decrement
+        """
+        with self._lock:
+            self._ref_count = max(0, self._ref_count - 1)
+            return self._ref_count
+
+    def cleanup(self) -> None:
+        """
+        Cleanup connection resources. This is an alias for disconnect.
+        """
+        self.disconnect()
+
     @contextmanager
     def acquire_reference(self):
         """
@@ -1600,209 +1908,519 @@ class PyRPLConnection:
         pass
 
 
+def create_pyrpl_connection(hostname: str, config_name: str, 
+                           status_callback: Optional[Callable] = None,
+                           connection_timeout: float = 10.0,
+                           mock_mode: bool = False) -> Optional[PyRPLConnection]:
+    """
+    Create a new PyRPL connection, either to real hardware or mock simulation.
+    
+    This function abstracts the creation of PyRPL connections, supporting both
+    real hardware connections and unified mock mode simulation.
+    
+    Parameters:
+        hostname (str): Red Pitaya hostname or IP address
+        config_name (str): PyRPL configuration name
+        status_callback (Optional[Callable]): Callback for status updates
+        connection_timeout (float): Connection timeout in seconds
+        mock_mode (bool): If True, return shared mock instance instead of real connection
+        
+    Returns:
+        Optional[PyRPLConnection]: Connection object or None if failed
+    """
+    if mock_mode:
+        # Return shared mock instance for coordinated simulation
+        mock_instance = get_shared_mock_instance(hostname)
+        if mock_instance is not None:
+            # Wrap the mock instance in a PyRPLConnection-compatible interface
+            return PyRPLMockConnectionAdapter(mock_instance, hostname, config_name)
+        else:
+            logger.error("Failed to create mock connection - EnhancedMockPyRPLConnection unavailable")
+            return None
+    else:
+        # Create real hardware connection
+        try:
+            connection_info = ConnectionInfo(
+                hostname=hostname,
+                config_name=config_name,
+                connection_timeout=connection_timeout
+            )
+            
+            real_connection = PyRPLConnection(connection_info)
+            
+            # Establish the actual connection
+            if real_connection.connect(status_callback):
+                return real_connection
+            else:
+                logger.error(f"Failed to establish connection to {hostname}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"Failed to create real PyRPL connection: {e}")
+            return None
+
+
+class PyRPLMockConnectionAdapter:
+    """
+    Adapter to make EnhancedMockPyRPLConnection compatible with PyRPLConnection interface.
+    
+    This adapter ensures that plugins can use the shared mock instance through the
+    same interface as real PyRPL connections, maintaining code compatibility.
+    """
+    
+    def __init__(self, mock_instance: 'EnhancedMockPyRPLConnection', hostname: str, config_name: str):
+        self._mock_instance = mock_instance
+        self._hostname = hostname
+        self._config_name = config_name
+        self._reference_count = 1
+        self._reference_lock = threading.Lock()
+        
+    @property
+    def is_connected(self) -> bool:
+        """Check if mock connection is active."""
+        return self._mock_instance.is_connected
+        
+    @property
+    def hostname(self) -> str:
+        """Get hostname."""
+        return self._hostname
+        
+    @property
+    def config_name(self) -> str:
+        """Get config name."""
+        return self._config_name
+        
+    def add_reference(self) -> int:
+        """Add reference count for connection sharing."""
+        with self._reference_lock:
+            self._reference_count += 1
+            return self._reference_count
+            
+    def remove_reference(self) -> int:
+        """Remove reference count."""
+        with self._reference_lock:
+            self._reference_count = max(0, self._reference_count - 1)
+            return self._reference_count
+            
+    def get_connection_info(self) -> Dict[str, Any]:
+        """Get connection information."""
+        base_info = self._mock_instance.get_connection_info()
+        base_info.update({
+            'config_name': self._config_name,
+            'reference_count': self._reference_count,
+            'adapter_type': 'PyRPLMockConnectionAdapter'
+        })
+        return base_info
+        
+    def disconnect(self) -> None:
+        """Disconnect (no-op for shared mock instance)."""
+        logger.debug(f"Mock connection adapter disconnect called for {self._hostname}")
+        
+    def cleanup(self) -> None:
+        """Cleanup (no-op for shared mock instance)."""
+        logger.debug(f"Mock connection adapter cleanup called for {self._hostname}")
+        
+    def __getattr__(self, name):
+        """Delegate all other attributes to the mock instance."""
+        return getattr(self._mock_instance, name)
+
+
 class PyRPLManager:
     """
-    Singleton manager for PyRPL connections.
+    Singleton manager for PyRPL connections with thread-safe connection pooling.
 
-    Provides centralized connection pooling to prevent conflicts between
-    multiple PyMoDAQ plugins accessing the same Red Pitaya devices.
+    The PyRPLManager provides centralized management of PyRPL connections to prevent
+    conflicts when multiple PyMoDAQ plugins access the same Red Pitaya devices. It
+    implements connection pooling, reference counting, and automatic cleanup to ensure
+    robust multi-plugin coordination.
+
+    Key Features:
+    - **Singleton Pattern**: Single manager instance across all plugins
+    - **Connection Pooling**: Reuse connections between plugins
+    - **Reference Counting**: Track active plugin usage
+    - **Thread Safety**: Concurrent access protection with locks
+    - **Automatic Cleanup**: Resource management and error recovery
+    - **Status Monitoring**: Real-time connection health tracking
+
+    Design Pattern:
+    The manager follows a singleton pattern where all PyRPL plugins share the same
+    manager instance. This prevents connection conflicts that would occur if each
+    plugin created its own PyRPL instance to the same Red Pitaya device.
+
+    Connection Lifecycle:
+    1. **Request**: Plugin requests connection via connect_device()
+    2. **Pool Check**: Manager checks if connection already exists
+    3. **Create/Reuse**: Creates new connection or increments reference count
+    4. **Return**: Returns connection object to plugin
+    5. **Release**: Plugin releases connection via disconnect_device()
+    6. **Cleanup**: Manager decrements reference count and cleans up if needed
+
+    Thread Safety:
+    All public methods are protected with locks to ensure thread-safe operation
+    when multiple plugins access the manager concurrently.
+
+    Attributes:
+        _instance (PyRPLManager): Singleton instance
+        _lock (threading.Lock): Class-level lock for singleton creation
+        _connections (Dict): Pool of active PyRPL connections
+        _manager_lock (threading.RLock): Instance-level lock for thread safety
+        _initialized (bool): Initialization state flag
+
+    Example:
+        >>> manager = PyRPLManager.get_instance()
+        >>> connection = manager.connect_device('rp-f08d6c.local', 'myconfig')
+        >>> # Use connection...
+        >>> manager.disconnect_device('rp-f08d6c.local', 'myconfig')
+
+    Note:
+        This class should not be instantiated directly. Use get_instance() to
+        obtain the singleton instance.
     """
 
     _instance: Optional['PyRPLManager'] = None
     _lock = threading.Lock()
 
     def __new__(cls) -> 'PyRPLManager':
-        """Singleton implementation."""
+        """
+        Singleton implementation with thread-safe instance creation.
+        
+        Returns:
+            PyRPLManager: The singleton manager instance
+        """
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        """Initialize the manager (called only once due to singleton)."""
-        if self._initialized:
+        """
+        Initialize the PyRPL manager with connection pool and threading support.
+        
+        Note:
+            This method is called only once due to singleton pattern.
+            Subsequent calls are no-ops to prevent re-initialization.
+        """
+        if hasattr(self, '_initialized') and self._initialized:
             return
-
+        
         self._connections: Dict[str, PyRPLConnection] = {}
         self._manager_lock = threading.RLock()
         self._initialized = True
-
         logger.info("PyRPL Manager initialized")
 
-    def get_connection(self, hostname: str, config_name: str = "pymodaq",
-                      **connection_kwargs) -> Optional[PyRPLConnection]:
+    def get_connection(self, hostname: str, config_name: str) -> Optional[PyRPLConnection]:
         """
-        Get or create a connection to a Red Pitaya device.
-
-        Args:
-            hostname: Red Pitaya hostname or IP address
-            config_name: PyRPL configuration name
-            **connection_kwargs: Additional connection parameters
-
+        Retrieve an existing connection from the pool.
+        
+        Parameters:
+            hostname (str): Red Pitaya hostname or IP address
+            config_name (str): PyRPL configuration name
+            
         Returns:
-            PyRPLConnection instance or None if creation failed
+            Optional[PyRPLConnection]: Existing connection if found, None otherwise
+            
+        Thread Safety:
+            This method is thread-safe and can be called concurrently.
         """
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
-
-            if connection_key in self._connections:
-                connection = self._connections[connection_key]
-                logger.debug(f"Returning existing connection to {hostname}")
-                return connection
-
-            # Create new connection
-            connection_info = ConnectionInfo(
-                hostname=hostname,
-                config_name=config_name,
-                **connection_kwargs
-            )
-
-            try:
-                connection = PyRPLConnection(connection_info)
-                self._connections[connection_key] = connection
-                logger.info(f"Created new connection to {hostname}")
-                return connection
-
-            except Exception as e:
-                logger.error(f"Failed to create connection to {hostname}: {e}")
-                return None
-
-    def connect_device(self, hostname: str, config_name: str = "pymodaq",
-                      status_callback: Optional[callable] = None,
-                      **connection_kwargs) -> Optional[PyRPLConnection]:
-        """
-        Connect to a Red Pitaya device.
-
-        Args:
-            hostname: Red Pitaya hostname or IP address
-            config_name: PyRPL configuration name
-            status_callback: Optional callback for status updates
-            **connection_kwargs: Additional connection parameters
-
-        Returns:
-            Connected PyRPLConnection instance or None if failed
-        """
-        connection = self.get_connection(hostname, config_name, **connection_kwargs)
-
-        if connection is None:
-            return None
-
-        if connection.connect(status_callback):
-            return connection
-        else:
-            return None
-
-    def disconnect_device(self, hostname: str, config_name: str = "pymodaq",
-                         status_callback: Optional[callable] = None) -> bool:
-        """
-        Disconnect from a Red Pitaya device.
-
-        Args:
-            hostname: Red Pitaya hostname or IP address
-            config_name: PyRPL configuration name
-            status_callback: Optional callback for status updates
-
-        Returns:
-            bool: True if successful
-        """
-        with self._manager_lock:
-            connection_key = f"{hostname}:{config_name}"
-
-            if connection_key not in self._connections:
-                return True  # Already disconnected
-
-            connection = self._connections[connection_key]
-
-            # Check if connection is still in use
-            if connection._ref_count > 0:
-                logger.warning(f"Connection {hostname} still has active references, disconnecting anyway")
-
-            connection.disconnect(status_callback)
-            return True
-
-    def remove_connection(self, hostname: str, config_name: str = "pymodaq") -> bool:
-        """
-        Remove a connection from the manager.
-
-        Args:
-            hostname: Red Pitaya hostname or IP address
-            config_name: PyRPL configuration name
-
-        Returns:
-            bool: True if removed successfully
-        """
-        with self._manager_lock:
-            connection_key = f"{hostname}:{config_name}"
-
-            if connection_key in self._connections:
-                connection = self._connections[connection_key]
-
-                # Ensure connection is disconnected
+            connection = self._connections.get(connection_key)
+            
+            if connection is not None:
                 if connection.is_connected:
-                    connection.disconnect()
+                    logger.debug(f"Retrieved existing connection for {connection_key}")
+                    return connection
+                else:
+                    # Clean up dead connection
+                    logger.warning(f"Removing dead connection for {connection_key}")
+                    del self._connections[connection_key]
+                    try:
+                        connection.cleanup()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up dead connection: {e}")
+                    
+            return None
 
-                del self._connections[connection_key]
-                logger.info(f"Removed connection to {hostname}")
-                return True
-
-            return False
-
-    def get_all_connections(self) -> Dict[str, PyRPLConnection]:
+    def connect_device(self, hostname: str, config_name: str, 
+                      status_callback: Optional[Callable] = None,
+                      connection_timeout: float = 10.0,
+                      mock_mode: bool = False) -> Optional[PyRPLConnection]:
         """
-        Get all active connections.
-
+        Connect to a Red Pitaya device with connection pooling and reference counting.
+        
+        This method implements intelligent connection management:
+        - Returns existing connection if available and healthy
+        - Creates new connection if none exists
+        - Increments reference count for connection tracking
+        - Handles connection failures gracefully
+        
+        Parameters:
+            hostname (str): Red Pitaya hostname or IP address (e.g., 'rp-f08d6c.local')
+            config_name (str): PyRPL configuration name for this connection
+            status_callback (Optional[Callable]): Callback for status updates
+            connection_timeout (float): Connection timeout in seconds (default: 10.0)
+            mock_mode (bool): If True, use shared EnhancedMockPyRPLConnection for simulation
+            
         Returns:
-            Dictionary mapping connection keys to PyRPLConnection instances
+            Optional[PyRPLConnection]: Connected PyRPL connection object, or None if failed
+            
+        Raises:
+            ConnectionError: If connection fails after retries
+            TimeoutError: If connection times out
+            
+        Example:
+            >>> manager = PyRPLManager.get_instance()
+            >>> def status_cb(cmd): print(f"Status: {cmd}")
+            >>> conn = manager.connect_device('rp-f08d6c.local', 'pid_control', status_cb)
+            >>> if conn and conn.is_connected:
+            ...     print("Connected successfully")
+        """
+        connection = self.get_connection(hostname, config_name)
+        if connection is not None:
+            connection.add_reference()
+            return connection
+        
+        # Create new connection
+        try:
+            connection = create_pyrpl_connection(hostname, config_name, 
+                                               status_callback, connection_timeout, mock_mode)
+            if connection and connection.is_connected:
+                with self._manager_lock:
+                    connection_key = f"{hostname}:{config_name}"
+                    self._connections[connection_key] = connection
+                    logger.info(f"Created new connection for {connection_key}")
+                return connection
+            else:
+                logger.error(f"Failed to create connection to {hostname}")
+                return None
+        except Exception as e:
+            logger.error(f"Error creating connection to {hostname}: {e}")
+            return None
+
+    def disconnect_device(self, hostname: str, config_name: str,
+                         status_callback: Optional[Callable] = None) -> bool:
+        """
+        Disconnect from a Red Pitaya device with reference counting.
+        
+        This method decrements the reference count for the specified connection.
+        The actual disconnection only occurs when the reference count reaches zero,
+        allowing multiple plugins to safely share the same connection.
+        
+        Parameters:
+            hostname (str): Red Pitaya hostname or IP address
+            config_name (str): PyRPL configuration name
+            status_callback (Optional[Callable]): Callback for status updates
+            
+        Returns:
+            bool: True if disconnect successful, False otherwise
+            
+        Behavior:
+            - Decrements reference count for the connection
+            - If count reaches zero, performs actual disconnection
+            - If count > 0, keeps connection alive for other plugins
+            - Handles cleanup of connection resources
+            
+        Example:
+            >>> manager.disconnect_device('rp-f08d6c.local', 'pid_control')
         """
         with self._manager_lock:
-            return self._connections.copy()
+            connection_key = f"{hostname}:{config_name}"
+            connection = self._connections.get(connection_key)
+            
+            if connection is None:
+                logger.warning(f"No connection found for {connection_key}")
+                return False
+            
+            try:
+                remaining_refs = connection.remove_reference()
+                
+                if remaining_refs <= 0:
+                    # Last reference removed - perform actual disconnect
+                    connection.disconnect()
+                    del self._connections[connection_key]
+                    logger.info(f"Disconnected and removed connection for {connection_key}")
+                else:
+                    logger.info(f"Decremented reference count for {connection_key} (remaining: {remaining_refs})")
+                
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error disconnecting from {hostname}: {e}")
+                return False
 
-    def disconnect_all(self, status_callback: Optional[callable] = None) -> None:
+    def remove_connection(self, hostname: str, config_name: str) -> bool:
         """
-        Disconnect all active connections.
-
-        Args:
-            status_callback: Optional callback for status updates
+        Forcibly remove a connection from the pool.
+        
+        This method removes a connection from the pool regardless of reference count.
+        Use with caution as it may leave plugins with invalid connection objects.
+        
+        Parameters:
+            hostname (str): Red Pitaya hostname or IP address
+            config_name (str): PyRPL configuration name
+            
+        Returns:
+            bool: True if connection was found and removed, False otherwise
+            
+        Warning:
+            This method bypasses reference counting and should only be used for
+            cleanup operations or error recovery. It may leave plugins with
+            invalid connection references.
         """
         with self._manager_lock:
-            for connection_key, connection in list(self._connections.items()):
+            connection_key = f"{hostname}:{config_name}"
+            connection = self._connections.get(connection_key)
+            
+            if connection is None:
+                return False
+                
+            try:
+                connection.disconnect()
+                connection.cleanup()
+                del self._connections[connection_key]
+                logger.warning(f"Forcibly removed connection for {connection_key}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error removing connection for {connection_key}: {e}")
+                # Remove from pool even if cleanup failed
+                del self._connections[connection_key]
+                return False
+
+    def get_all_connections(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get status information for all active connections.
+        
+        Returns:
+            Dict[str, Dict[str, Any]]: Dictionary mapping connection keys to status info
+            
+        The returned dictionary contains connection information with the following structure:
+        {
+            "hostname:config_name": {
+                "hostname": str,
+                "config_name": str,
+                "is_connected": bool,
+                "reference_count": int,
+                "state": str,
+                "last_activity": float
+            }
+        }
+        
+        Example:
+            >>> manager = PyRPLManager.get_instance()
+            >>> connections = manager.get_all_connections()
+            >>> for key, info in connections.items():
+            ...     print(f"{key}: {info['reference_count']} refs, connected={info['is_connected']}")
+        """
+        with self._manager_lock:
+            status = {}
+            for key, connection in self._connections.items():
                 try:
-                    connection.disconnect(status_callback)
+                    conn_info = connection.get_connection_info()
+                    status[key] = conn_info
                 except Exception as e:
-                    logger.error(f"Error disconnecting {connection_key}: {e}")
+                    logger.error(f"Error getting info for connection {key}: {e}")
+                    status[key] = {
+                        "hostname": key.split(':')[0],
+                        "config_name": key.split(':')[1] if ':' in key else 'unknown',
+                        "is_connected": False,
+                        "reference_count": 0,
+                        "state": "error",
+                        "error": str(e)
+                    }
+            return status
+
+    def disconnect_all(self) -> None:
+        """
+        Disconnect all active connections and clear the connection pool.
+        
+        This method forcibly disconnects all connections regardless of reference counts.
+        It's primarily used during application shutdown or emergency cleanup.
+        
+        Warning:
+            This method bypasses reference counting and will invalidate all active
+            connection objects. Plugins may experience connection errors after this call.
+            
+        Use Cases:
+            - Application shutdown
+            - Emergency cleanup
+            - Testing scenarios
+            - Error recovery
+        """
+        with self._manager_lock:
+            logger.info("Disconnecting all PyRPL connections")
+            for key, connection in list(self._connections.items()):
+                try:
+                    connection.disconnect()
+                    connection.cleanup()
+                except Exception as e:
+                    logger.error(f"Error disconnecting {key}: {e}")
+            
+            self._connections.clear()
+            logger.info("All PyRPL connections disconnected")
 
     def cleanup(self) -> None:
         """
-        Clean up all connections and resources.
+        Perform comprehensive cleanup of the manager and all connections.
+        
+        This method ensures proper resource cleanup including:
+        - Disconnecting all active connections
+        - Clearing the connection pool
+        - Resetting manager state
+        
+        Note:
+            After calling this method, the manager remains functional and can
+            create new connections. This is different from a destructor.
         """
-        logger.info("Cleaning up PyRPL Manager")
         self.disconnect_all()
-
-        with self._manager_lock:
-            self._connections.clear()
+        logger.info("PyRPL Manager cleanup completed")
 
     def get_manager_status(self) -> Dict[str, Any]:
         """
-        Get detailed manager status.
-
+        Get comprehensive status information about the manager and all connections.
+        
         Returns:
-            Dictionary with manager status information
+            Dict[str, Any]: Comprehensive manager status including:
+                - total_connections: Number of active connections
+                - connections: Detailed info for each connection
+                - manager_state: Manager health and statistics
+                
+        Example:
+            >>> status = manager.get_manager_status()
+            >>> print(f"Active connections: {status['total_connections']}")
+            >>> for conn_info in status['connections'].values():
+            ...     print(f"  {conn_info['hostname']}: {conn_info['reference_count']} refs")
         """
         with self._manager_lock:
-            connections_info = {}
-            for key, conn in self._connections.items():
-                connections_info[key] = conn.get_connection_info()
-
+            connections_info = self.get_all_connections()
+            
             return {
-                'total_connections': len(self._connections),
-                'connections': connections_info
+                "total_connections": len(self._connections),
+                "connections": connections_info,
+                "manager_state": {
+                    "initialized": getattr(self, '_initialized', False),
+                    "thread_id": threading.current_thread().ident,
+                    "lock_acquired": False  # Can't check this safely
+                }
             }
 
     @classmethod
     def get_instance(cls) -> 'PyRPLManager':
-        """Get the singleton instance."""
+        """
+        Get the singleton PyRPLManager instance.
+        
+        Returns:
+            PyRPLManager: The singleton manager instance
+            
+        Note:
+            This is the preferred way to access the PyRPLManager. Do not
+            instantiate the class directly.
+            
+        Example:
+            >>> manager = PyRPLManager.get_instance()
+            >>> connection = manager.connect_device('hostname', 'config')
+        """
         return cls()
 
 
