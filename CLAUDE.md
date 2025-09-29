@@ -1,6 +1,6 @@
-# Developer Guide
+# CLAUDE.md
 
-This file provides development guidance when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -8,11 +8,29 @@ This file provides development guidance when working with code in this repositor
 
 ## Development Commands
 
+### Installation
+```bash
+# Install basic plugin (without PyRPL)
+uv sync
+
+# Install PyRPL for hardware support - Choose one method:
+
+# Method 1: Using the executable script (recommended)
+./install-pyrpl
+
+# Method 2: Using the Python module directly
+uv run python src/pymodaq_plugins_pyrpl/install_pyrpl.py
+
+# Method 3: Manual PyRPL installation
+uv pip install --no-deps pyrpl>=0.9.3.0
+uv pip install nose paramiko pyyaml scp numpy pandas scipy pyqtgraph qtpy PyQt5 quamash
+
+# Install in development mode (after PyRPL)
+pip install -e .
+```
+
 ### Building and Testing
 ```bash
-# Install in development mode
-pip install -e .
-
 # Run all tests (50+ test cases)
 python -m pytest tests/
 
@@ -265,33 +283,44 @@ These tools significantly improve search efficiency and accuracy when available.
 
 ## Project Status Summary
 
-**Current State**: Complete PyRPL integration suite with comprehensive functionality - HARDWARE VALIDATED
+**Current State**: Complete PyRPL integration suite with comprehensive functionality - HARDWARE VALIDATED & RECOVERED
 **Plugin Count**: 6 complete plugins + infrastructure
 **Test Coverage**: 50+ automated tests including mock and hardware validation
-**Documentation**: Complete user and developer documentation
+**Documentation**: Complete user and developer documentation + recovery procedures
 **Maturity**: Production-ready for research and industrial applications
 
-**HARDWARE VALIDATION COMPLETE (August 2025)**:
+**HARDWARE VALIDATION & RECOVERY COMPLETE (September 2025)**:
+- **System Recovery Achievement**: Successfully recovered Red Pitaya from severe Ubuntu "unminimize" corruption
+- **Complete System Restoration**: SD card re-flash + corrupted library repair (librp-hw-profiles.so rebuilt)
 - **Real Hardware Testing**: Successfully validated with Red Pitaya STEMlab at rp-f08d6c.local
 - **All Plugins Working**: PID, ASG, Scope, IQ, and Voltage Monitor plugins fully functional
-- **PyRPL Compatibility Fixed**: Resolved Python 3.12 compatibility issues
-  - collections.Mapping deprecation to collections.abc.Mapping
-  - np.complex deprecation to complex builtin
+- **PyRPL Compatibility Fixed**: Resolved ALL Python 3.12 compatibility issues
+  - collections.Mapping deprecation → collections.abc.Mapping
+  - np.complex deprecation → complex builtin
   - Qt timer float/int compatibility with int conversion patch
   - PyRPL ZeroDivisionError handling with graceful error recovery
-- **Connection Management**: Thread-safe PyRPL wrapper working with real hardware
-- **Data Acquisition**: Real-time voltage readings and control confirmed
+- **FPGA Communication**: Full register access and bitstream loading verified
+- **Connection Management**: Thread-safe PyRPL wrapper working with recovered hardware
+- **Data Acquisition**: Real-time voltage readings and hardware control confirmed
 
 **Key Achievements**:
-- Hardware-validated multi-plugin coordination
+- Hardware-validated multi-plugin coordination with complete system recovery expertise
 - Complete hardware module coverage (PID, ASG, Scope, IQ)
 - Mock mode AND real hardware support
-- Comprehensive error handling and recovery
+- Comprehensive error handling and recovery procedures
 - Python 3.12 + PyQt5 compatibility established
-- Professional documentation and testing
+- Professional documentation including recovery guides
+- Red Pitaya system recovery tools and validated procedures
 - Production deployment ready
 
-**Next Steps**: 
+**Recovery Expertise Developed**:
+- Ubuntu "unminimize" corruption recovery procedures
+- Shared library rebuilding from static archives
+- FPGA communication restoration techniques
+- PyRPL Python 3.12 compatibility fixes
+- Complete system validation protocols
+
+**Next Steps**:
 - Package release and PyPI publication
 - User feedback integration from hardware-validated solution
 - Performance optimization based on real-world usage
