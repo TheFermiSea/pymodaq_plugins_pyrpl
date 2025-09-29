@@ -13,14 +13,18 @@ Classes:
 
 import asyncio
 import logging
+import sys
 import threading
 import time
+import types
 from contextlib import contextmanager
 from typing import Dict, Optional, Union, Any, List, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+
+from .quamash_shim import ensure_quamash_shim
 
 QtCore = None
 QtWidgets = None
@@ -154,11 +158,14 @@ try:
             return PYRPL_AVAILABLE
             
         try:
+            ensure_quamash_shim(logger)
+            _ensure_pyqt4_alias()
             import pyrpl as pyrpl_module
             from pyrpl.hardware_modules.pid import Pid as PidModule_imported
             
             pyrpl = pyrpl_module
             PidModule = PidModule_imported
+            _get_or_create_event_loop()
             PYRPL_AVAILABLE = True
             logger.info("PyRPL imported successfully via lazy loading")
             return True
@@ -190,17 +197,74 @@ except (ImportError, TypeError, AttributeError) as e:
 
 from pymodaq_utils.utils import ThreadCommand
 
-# Import enhanced mock connection for unified simulation
-try:
-    from .enhanced_mock_connection import EnhancedMockPyRPLConnection
-    ENHANCED_MOCK_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Enhanced mock connection unavailable: {e}")
-    ENHANCED_MOCK_AVAILABLE = False
-    EnhancedMockPyRPLConnection = None
-
 
 logger = logging.getLogger(__name__)
+
+_EVENT_LOOP_LOCK = threading.Lock()
+_QASYNC_DEFAULT_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _ensure_pyqt4_alias() -> bool:
+    existing = sys.modules.get("PyQt4")
+    if existing and getattr(existing, "_pymodaq_pyqt4_shim", False):
+        return True
+
+    try:
+        from qtpy import QtCore as _QtCore, QtGui as _QtGui, QtWidgets as _QtWidgets
+    except ImportError as exc:
+        logger.error("Qt bindings not available for PyRPL integration: %s", exc)
+        return False
+
+    module = types.ModuleType("PyQt4")
+    module.QtCore = _QtCore
+    module.QtGui = _QtGui
+    module.QtWidgets = _QtWidgets
+    module.__all__ = ["QtCore", "QtGui", "QtWidgets"]
+    module._pymodaq_pyqt4_shim = True
+
+    sys.modules["PyQt4"] = module
+    sys.modules.setdefault("PyQt4.QtCore", _QtCore)
+    sys.modules.setdefault("PyQt4.QtGui", _QtGui)
+    sys.modules.setdefault("PyQt4.QtWidgets", _QtWidgets)
+    return True
+
+
+def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+    with _EVENT_LOOP_LOCK:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+
+        ensure_quamash_shim(logger)
+        _ensure_pyqt4_alias()
+
+        try:
+            import qasync
+            from qtpy import QtWidgets
+        except ImportError as exc:
+            raise RuntimeError(
+                "qasync>=0.28.0 and Qt bindings are required for PyRPL integration"
+            ) from exc
+
+        qt_app = QtWidgets.QApplication.instance()
+        if qt_app is None:
+            qt_app = QtWidgets.QApplication(["pymodaq-pyrpl"])
+
+        global _QASYNC_DEFAULT_LOOP
+        if _QASYNC_DEFAULT_LOOP is not None and not _QASYNC_DEFAULT_LOOP.is_closed():
+            asyncio.set_event_loop(_QASYNC_DEFAULT_LOOP)
+            return _QASYNC_DEFAULT_LOOP
+
+        loop = qasync.QEventLoop(qt_app)
+        asyncio.set_event_loop(loop)
+        _QASYNC_DEFAULT_LOOP = loop
+        return loop
 
 
 # =============================================================================
@@ -397,6 +461,16 @@ class ScopeDecimation(Enum):
     DEC_8192 = 8192
     DEC_65536 = 65536
 
+
+
+# Import enhanced mock connection for unified simulation (after enum definitions)
+try:
+    from .enhanced_mock_connection import EnhancedMockPyRPLConnection
+    ENHANCED_MOCK_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced mock connection unavailable: {e}")
+    ENHANCED_MOCK_AVAILABLE = False
+    EnhancedMockPyRPLConnection = None
 
 @dataclass
 class PIDConfiguration:
@@ -630,15 +704,8 @@ class PyRPLConnection:
                     # This is the core PyRPL initialization that connects to Red Pitaya
                     # Handle asyncio event loop requirement for PyRPL
                     # Require host-provided qasync loop instead of creating competing loops
-                    try:
-                        loop = asyncio.get_running_loop()
-                        logger.info(f"Using host-provided event loop: {type(loop)}")
-                    except RuntimeError as e:
-                        raise RuntimeError(
-                            "PyRPL plugin requires host (PyMoDAQ) to provide a running "
-                            "qasync-compatible event loop. Initialize qasync.QEventLoop(app) "
-                            f"and asyncio.set_event_loop(loop) before plugin initialization. Original error: {e}"
-                        ) from e
+                    loop = _get_or_create_event_loop()
+                    logger.info(f"Using event loop: {type(loop)}")
                     
                     def _create_pyrpl_instance():
                         return pyrpl.Pyrpl(
