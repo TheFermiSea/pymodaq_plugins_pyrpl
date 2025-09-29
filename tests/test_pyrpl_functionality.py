@@ -54,7 +54,7 @@ sys.modules['pyrpl.hardware_modules.pid'] = pyrpl_mock.hardware_modules.pid
 from pymodaq_plugins_pyrpl.utils.pyrpl_wrapper import (
     PyRPLManager, PyRPLConnection, PIDChannel, InputChannel, OutputChannel,
     PIDConfiguration, ConnectionInfo, ConnectionState, ScopeConfiguration, ScopeDecimation, ScopeTriggerSource,
-    IQConfiguration, IQChannel, IQOutputDirect, ASGChannel
+    IQConfiguration, IQChannel, IQOutputDirect, ASGChannel, PyRPLMockConnectionAdapter
 )
 
 # Import plugin classes  
@@ -446,8 +446,10 @@ class TestPyRPLWrapperMock:
         mock_pyrpl_instance = MockPyrpl()
         mock_pyrpl_module.Pyrpl = Mock(return_value = mock_pyrpl_instance)
         
+        conn1 = pyrpl_manager.connect_device(TEST_HOSTNAME, "test_config", mock_mode=True)
+        assert conn1 is not None
+
         # Request same connection twice
-        conn1 = pyrpl_manager.get_connection(TEST_HOSTNAME, "test_config")
         conn2 = pyrpl_manager.get_connection(TEST_HOSTNAME, "test_config")
         
         assert conn1 is conn2  # Should be same instance (pooled)
@@ -460,9 +462,11 @@ class TestPyRPLWrapperMock:
         mock_pyrpl_module.Pyrpl = Mock(return_value = MockPyrpl())
         
         # Request connections with different configs
-        conn1 = pyrpl_manager.get_connection(TEST_HOSTNAME, "config1")
-        conn2 = pyrpl_manager.get_connection(TEST_HOSTNAME, "config2")
+        conn1 = pyrpl_manager.connect_device(TEST_HOSTNAME, "config1", mock_mode=True)
+        conn2 = pyrpl_manager.connect_device(TEST_HOSTNAME, "config2", mock_mode=True)
         
+        assert conn1 is not None
+        assert conn2 is not None
         assert conn1 is not conn2  # Different configs = different connections
 
 
@@ -640,8 +644,9 @@ class TestDAQMovePyRPLPID:
             info, success = mock_move_plugin.ini_stage()
             
             assert success is True
-            assert "MOCK mode" in info
-            assert mock_move_plugin.controller is None
+            assert "mock mode" in info.lower()
+            assert mock_move_plugin.controller is not None
+            assert getattr(mock_move_plugin.controller, 'hostname', TEST_HOSTNAME)
 
     def test_mock_mode_operations(self, mock_move_plugin):
         """Test actuator operations in mock mode."""
@@ -801,8 +806,8 @@ class TestDAQ0DViewerPyRPL:
             info, success = mock_viewer_plugin.ini_detector()
             
             assert success is True
-            assert "Mock PyRPL connection" in info
-            assert isinstance(mock_viewer_plugin.controller, MockPyRPLConnection)
+            assert "mock mode" in info.lower()
+            assert isinstance(mock_viewer_plugin.controller, PyRPLMockConnectionAdapter)
 
     def test_mock_data_acquisition(self, mock_viewer_plugin):
         """Test data acquisition with mock connection."""
@@ -1687,6 +1692,24 @@ def hardware_connection():
     connection = None
 
     try:
+        # Restore real PyRPL module if earlier mocks are present
+        import sys
+        from unittest.mock import Mock as _Mock
+        if 'pyrpl' in sys.modules and isinstance(sys.modules['pyrpl'], _Mock):
+            for key in list(sys.modules.keys()):
+                if key == 'pyrpl' or key.startswith('pyrpl.'):
+                    sys.modules.pop(key)
+
+        # Ensure import machinery doesn't reuse cached mocks
+        import importlib
+        importlib.invalidate_caches()
+
+        # Ensure a QApplication exists for Quamash/Qt integrations
+        from qtpy import QtWidgets
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            QtWidgets.QApplication(['pymodaq-hw-tests'])
+
         # Import real PyRPL if available
         import pyrpl  # noqa: F401
 
