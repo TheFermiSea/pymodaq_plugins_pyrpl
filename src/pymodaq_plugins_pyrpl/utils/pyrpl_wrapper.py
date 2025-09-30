@@ -672,6 +672,9 @@ class PyRPLConnection:
         """
         Get a PID module for the specified channel.
 
+        CRITICAL: Always retrieves fresh reference to avoid Qt metaobject recursion.
+        Do NOT cache as it's a QObject.
+
         Args:
             channel: PID channel to retrieve
 
@@ -683,11 +686,9 @@ class PyRPLConnection:
                 return None
 
             try:
-                if channel not in self._active_pids:
-                    pid_module = getattr(self._redpitaya, channel.value)
-                    self._active_pids[channel] = pid_module
-
-                return self._active_pids[channel]
+                # CRITICAL: Get fresh reference each time
+                # Caching QObjects causes Qt metaobject recursion
+                return getattr(self._redpitaya, channel.value)
 
             except Exception as e:
                 logger.error(f"Failed to get PID module {channel.value}: {e}")
@@ -898,6 +899,9 @@ class PyRPLConnection:
         """
         Get an ASG module for the specified channel.
 
+        CRITICAL: Always retrieves fresh reference to avoid Qt metaobject recursion.
+        Do NOT cache as it's a QObject.
+
         Args:
             channel: ASG channel to retrieve
 
@@ -909,11 +913,9 @@ class PyRPLConnection:
                 return None
 
             try:
-                if channel not in self._active_asgs:
-                    asg_module = getattr(self._redpitaya, channel.value)
-                    self._active_asgs[channel] = asg_module
-
-                return self._active_asgs[channel]
+                # CRITICAL: Get fresh reference each time
+                # Caching QObjects causes Qt metaobject recursion
+                return getattr(self._redpitaya, channel.value)
 
             except Exception as e:
                 logger.error(f"Failed to get ASG module {channel.value}: {e}")
@@ -1097,6 +1099,10 @@ class PyRPLConnection:
         """
         Get the scope module for oscilloscope functionality.
 
+        CRITICAL: Always retrieves fresh reference to avoid Qt metaobject recursion.
+        Do NOT cache the scope object as it's a QObject that triggers Qt introspection
+        when accessed from worker threads.
+
         Returns:
             Scope module or None if not available
         """
@@ -1105,10 +1111,9 @@ class PyRPLConnection:
                 return None
 
             try:
-                if self._scope_module is None:
-                    self._scope_module = self._redpitaya.scope
-
-                return self._scope_module
+                # CRITICAL: Get fresh reference each time, do NOT cache
+                # Caching QObjects causes Qt metaobject recursion in worker threads
+                return self._redpitaya.scope
 
             except Exception as e:
                 logger.error(f"Failed to get scope module: {e}")
@@ -1324,6 +1329,9 @@ class PyRPLConnection:
         """
         Get an IQ module for the specified channel.
 
+        CRITICAL: Always retrieves fresh reference to avoid Qt metaobject recursion.
+        Do NOT cache as it's a QObject.
+
         Args:
             channel: IQ channel to retrieve
 
@@ -1335,11 +1343,9 @@ class PyRPLConnection:
                 return None
 
             try:
-                if channel not in self._active_iqs:
-                    iq_module = getattr(self._redpitaya, channel.value)
-                    self._active_iqs[channel] = iq_module
-
-                return self._active_iqs[channel]
+                # CRITICAL: Get fresh reference each time
+                # Caching QObjects causes Qt metaobject recursion
+                return getattr(self._redpitaya, channel.value)
 
             except Exception as e:
                 logger.error(f"Failed to get IQ module {channel.value}: {e}")
