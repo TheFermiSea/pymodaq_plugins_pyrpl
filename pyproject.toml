@@ -1,6 +1,6 @@
 [features]  # defines the plugin features contained into this plugin
 instruments = true  # true if plugin contains instrument classes (else false, notice the lowercase for toml files)
-extensions = false  # true if plugins contains dashboard extensions
+extensions = true  # true if plugins contains dashboard extensions
 models = true  # true if plugins contains pid models
 h5exporters = false  # true if plugin contains custom h5 file exporters
 scanners = false  # true if plugin contains custom scan layout (daq_scan extensions)
@@ -13,8 +13,10 @@ name = "pymodaq_plugins_pyrpl" #todo modify template by your plugin short name
 description = 'A PyMoDAQ plugin for the Red Pitaya, using the PyRPL library.'
 dependencies = [
     "pymodaq>=5.0.0",
-    "pyrpl",
-    #todo: list here all dependencies your package may have
+    # pyrpl installed separately via install_pyrpl.py due to Python 2 'futures' dependency conflict
+    "qasync>=0.28.0",   # Required for unified Qt/asyncio event loop integration with PyRPL
+    "qtpy>=2.4.1",      # Qt abstraction layer used by plugin
+    "pyqt6>=6.7.1",     # Keeping PyQt6 for Phase 0 (can migrate to PyQt5 in Phase 1 if needed)
 ]
 
 authors = [
@@ -61,3 +63,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "ruff>=0.13.1",
+]

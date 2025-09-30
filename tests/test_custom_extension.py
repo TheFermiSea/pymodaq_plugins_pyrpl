@@ -10,7 +10,7 @@ class TestPyRPLExtension(unittest.TestCase):
         self.patcher = patch.dict('sys.modules', {'pyrpl': self.mock_pyrpl})
         self.patcher.start()
 
-        from src.pymodaq_plugins_pyrpl.extensions.custom_extension_pyrpl import PyRPLExtension
+        from pymodaq_plugins_pyrpl.extensions.custom_extension_pyrpl import PyRPLExtension
 
         self.app = QtWidgets.QApplication.instance()
         if self.app is None:
