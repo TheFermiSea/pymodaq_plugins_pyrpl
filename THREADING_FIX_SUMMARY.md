@@ -2,7 +2,7 @@
 
 **Date**: January 30, 2025  
 **Issue**: Thread stack overflow when launching Scope plugin in PyMoDAQ dashboard  
-**Status**: ✅ RESOLVED
+**Status**: RESOLVED
 
 ## Problem
 
@@ -58,15 +58,15 @@ self._pyrpl = pyrpl.Pyrpl(
 ## Verification
 
 ### Before Fix
-- ❌ Scope plugin crashes with stack overflow
-- ❌ Thread recursion in Qt event loop
-- ❌ Dashboard presets with Scope unusable
+- [FAIL] Scope plugin crashes with stack overflow
+- [FAIL] Thread recursion in Qt event loop
+- [FAIL] Dashboard presets with Scope unusable
 
 ### After Fix
-- ✅ Scope plugin initializes cleanly
-- ✅ No thread recursion errors
-- ✅ All plugins work in PyMoDAQ dashboard
-- ✅ Continuous data acquisition stable
+- [PASS] Scope plugin initializes cleanly
+- [PASS] No thread recursion errors
+- [PASS] All plugins work in PyMoDAQ dashboard
+- [PASS] Continuous data acquisition stable
 
 ## What NOT to Use
 
@@ -103,12 +103,12 @@ pytest tests/ -m hardware -v
 
 This solution is **production-ready** for distribution:
 
-✅ **Minimal Changes**: One parameter addition, defensive patching improvements  
-✅ **No New Dependencies**: Uses existing PyRPL feature (`gui=False`)  
-✅ **PyMoDAQ-Native**: Works within PyMoDAQ's standard threading model  
-✅ **No User Impact**: Plugin users see no difference, just reliability  
-✅ **Well Documented**: Complete technical documentation for maintainers  
-✅ **Tested**: Verified with real hardware and automated tests
+- **Minimal Changes**: One parameter addition, defensive patching improvements  
+- **No New Dependencies**: Uses existing PyRPL feature (`gui=False`)  
+- **PyMoDAQ-Native**: Works within PyMoDAQ's standard threading model  
+- **No User Impact**: Plugin users see no difference, just reliability  
+- **Well Documented**: Complete technical documentation for maintainers  
+- **Tested**: Verified with real hardware and automated tests
 
 ## References
 
