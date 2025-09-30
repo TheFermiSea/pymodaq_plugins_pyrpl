@@ -1,0 +1,11 @@
+pyrpl:
+  gui: false
+  modules: []
+  name: hardware_validation
+redpitaya:
+  autostart: true
+  gui: false
+  reloadfpga: false
+  reloadserver: false
+  timeout: 5
+scope: {}

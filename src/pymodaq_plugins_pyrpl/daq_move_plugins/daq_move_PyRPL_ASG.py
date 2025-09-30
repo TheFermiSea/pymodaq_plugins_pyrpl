@@ -42,6 +42,7 @@ from pymodaq.control_modules.move_utility_classes import (
 from pymodaq_utils.utils import ThreadCommand
 from pymodaq_gui.parameter import Parameter
 import logging
+import time
 
 # Import configuration and threading utilities
 from ..utils.config import get_pyrpl_config
@@ -54,6 +55,18 @@ from ..utils.pyrpl_wrapper import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ASGConnectionError(Exception):
+    """Custom exception for ASG connection failures."""
+
+
+class ASGConfigurationError(Exception):
+    """Custom exception for ASG configuration errors."""
+
+
+class ASGFrequencyError(ValueError):
+    """Custom exception for frequency-related errors."""
 
 
 def get_asg_parameters():
@@ -200,6 +213,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         self.mock_frequency: float = 1000.0  # Default mock frequency
         self.mock_min_freq: float = 0.0
         self.mock_max_freq: float = 1e6
+        self.mock_settle_time: float = 0.05  # Simulated hardware response time
 
         # Connection state tracking
         self.connection_status: str = "Disconnected"
@@ -244,23 +258,28 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
                 return self.mock_frequency
 
             if self.controller is None or not self.controller.is_connected:
-                raise Exception("ASG controller not connected")
+                raise ASGConnectionError("ASG controller not connected")
 
             if self.asg_channel is None:
-                raise Exception("ASG channel not configured")
+                raise ASGConnectionError("ASG channel not configured")
 
             frequency = self.controller.get_asg_frequency(self.asg_channel)
             if frequency is None:
-                raise Exception("Failed to read ASG frequency")
+                raise ASGConnectionError("Failed to read ASG frequency")
 
             logger.debug(f"Read ASG frequency: {frequency} Hz")
             return frequency
 
-        except Exception as e:
+        except (ASGConnectionError, ASGConfigurationError, ASGFrequencyError) as e:
             error_msg = f"Failed to get ASG frequency: {str(e)}"
             logger.error(error_msg)
             self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
             raise
+        except Exception as e:
+            error_msg = f"Failed to get ASG frequency: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+            raise ASGConnectionError(str(e)) from e
 
     def close(self) -> None:
         """
@@ -404,35 +423,36 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             Target frequency in Hz
         """
         try:
-            # Validate frequency limits
-            freq_min = self.settings.child('control_settings', 'frequency_min').value()
-            freq_max = self.settings.child('control_settings', 'frequency_max').value()
-
-            if not (freq_min <= position <= freq_max):
-                raise ValueError(f"Frequency {position} Hz out of range [{freq_min}, {freq_max}] Hz")
+            self._validate_frequency(position)
 
             if self.mock_mode:
+                time.sleep(self.mock_settle_time)
                 self.mock_frequency = position
                 logger.debug(f"Mock mode: set frequency to {position} Hz")
                 return
 
             if self.controller is None or not self.controller.is_connected:
-                raise Exception("ASG controller not connected")
+                raise ASGConnectionError("ASG controller not connected")
 
             if self.asg_channel is None:
-                raise Exception("ASG channel not configured")
+                raise ASGConnectionError("ASG channel not configured")
 
             success = self.controller.set_asg_frequency(self.asg_channel, position)
             if not success:
-                raise Exception("Failed to set ASG frequency")
+                raise ASGConnectionError("Failed to set ASG frequency")
 
             logger.info(f"Set ASG frequency to {position} Hz")
 
-        except Exception as e:
+        except (ASGFrequencyError, ASGConnectionError) as e:
             error_msg = f"Failed to move ASG to {position} Hz: {str(e)}"
             logger.error(error_msg)
             self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
             raise
+        except Exception as e:
+            error_msg = f"Failed to move ASG to {position} Hz: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+            raise ASGConnectionError(str(e)) from e
 
     def move_home(self) -> None:
         """
@@ -457,8 +477,14 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             target_freq = current_freq + position
 
             logger.debug(f"Relative move: {current_freq} + {position} = {target_freq} Hz")
+            self._validate_frequency(target_freq)
             self.move_abs(target_freq)
 
+        except ASGFrequencyError as e:
+            error_msg = f"Failed to move ASG relatively by {position} Hz: {str(e)}"
+            logger.error(error_msg)
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+            raise
         except Exception as e:
             error_msg = f"Failed to move ASG relatively by {position} Hz: {str(e)}"
             logger.error(error_msg)
@@ -495,6 +521,24 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
 
     # Helper methods
 
+    def _validate_frequency(self, frequency: float) -> None:
+        """Validate frequency against safety limits."""
+        freq_min = self.settings.child('safety_settings', 'min_frequency').value()
+        freq_max = self.settings.child('safety_settings', 'max_frequency').value()
+
+        if not (freq_min <= frequency <= freq_max):
+            raise ASGFrequencyError(
+                f"Frequency {frequency:.2f} Hz is out of the allowed range "
+                f"[{freq_min:.2f}, {freq_max:.2f}] Hz."
+            )
+
+    def _get_setting_value(self, group: str, name: str, default: Any = None) -> Any:
+        """Safely retrieve a parameter value with a fallback default."""
+        try:
+            return self.settings.child(group, name).value()
+        except Exception:
+            return default
+
     def _initialize_mock_mode(self) -> str:
         """Initialize plugin in mock mode for development."""
         logger.info("Initializing ASG Plugin in mock mode")
@@ -503,8 +547,8 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         self.mock_frequency = 1000.0  # Default 1kHz
 
         # Setup mock frequency limits
-        self.mock_min_freq = self.settings.child('control_settings', 'frequency_min').value()
-        self.mock_max_freq = self.settings.child('control_settings', 'frequency_max').value()
+        self.mock_min_freq = self.settings.child('safety_settings', 'min_frequency').value()
+        self.mock_max_freq = self.settings.child('safety_settings', 'max_frequency').value()
 
         return "ASG Plugin initialized in mock mode"
 
@@ -552,16 +596,23 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             return
 
         # Create ASG configuration from parameters
+        amplitude = self._get_setting_value('signal_params', 'amplitude', 0.1)
+        offset = self._get_setting_value('signal_params', 'offset', 0.0)
+        phase = self._get_setting_value('signal_params', 'phase', 0.0)
+        waveform_value = self._get_setting_value('asg_config', 'waveform', 'sin')
+        trigger_source_value = self._get_setting_value('control_settings', 'trigger_source', 'immediately')
+        output_enable_value = self._get_setting_value('control_settings', 'output_enable', False)
+
         config = ASGConfiguration(
             frequency=self.mock_frequency,  # Will be updated by moves
-            amplitude=self.settings.child('asg_settings', 'amplitude').value(),
-            offset=self.settings.child('asg_settings', 'offset').value(),
-            phase=self.settings.child('asg_settings', 'phase').value(),
-            waveform=ASGWaveform(self.settings.child('asg_settings', 'waveform').value()),
-            trigger_source=ASGTriggerSource(self.settings.child('control_settings', 'trigger_source').value()),
-            output_enable=self.settings.child('control_settings', 'output_enable').value(),
-            frequency_min=self.settings.child('control_settings', 'frequency_min').value(),
-            frequency_max=self.settings.child('control_settings', 'frequency_max').value(),
+            amplitude=amplitude,
+            offset=offset,
+            phase=phase,
+            waveform=ASGWaveform(waveform_value),
+            trigger_source=ASGTriggerSource(trigger_source_value),
+            output_enable=output_enable_value,
+            frequency_min=self.settings.child('safety_settings', 'min_frequency').value(),
+            frequency_max=self.settings.child('safety_settings', 'max_frequency').value(),
         )
 
         success = self.controller.configure_asg(self.asg_channel, config)
@@ -569,7 +620,7 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
             self.current_asg_config = config
             logger.info(f"ASG {self.asg_channel.value} configured successfully")
         else:
-            raise Exception(f"Failed to configure ASG {self.asg_channel.value}")
+            raise ASGConfigurationError(f"Failed to configure ASG {self.asg_channel.value}")
 
     def _update_asg_configuration(self) -> None:
         """Update ASG configuration when parameters change."""
@@ -583,14 +634,14 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
 
     def _validate_frequency_limits(self) -> None:
         """Validate frequency limit parameters."""
-        freq_min = self.settings.child('control_settings', 'frequency_min').value()
-        freq_max = self.settings.child('control_settings', 'frequency_max').value()
+        freq_min = self.settings.child('safety_settings', 'min_frequency').value()
+        freq_max = self.settings.child('safety_settings', 'max_frequency').value()
 
         if freq_min >= freq_max:
             logger.warning(f"Invalid frequency limits: min={freq_min} >= max={freq_max}")
             # Reset to safe defaults
-            self.settings.child('control_settings', 'frequency_min').setValue(0.0)
-            self.settings.child('control_settings', 'frequency_max').setValue(1e6)
+            self.settings.child('safety_settings', 'min_frequency').setValue(0.0)
+            self.settings.child('safety_settings', 'max_frequency').setValue(1e6)
 
     def _setup_logging(self, debug_enabled: bool) -> None:
         """Setup logging level based on debug setting."""

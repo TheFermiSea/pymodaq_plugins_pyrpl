@@ -60,9 +60,14 @@ from pymodaq_plugins_pyrpl.utils.pyrpl_wrapper import (
 # Import plugin classes  
 from pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID import DAQ_Move_PyRPL_PID
 from pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_0D.daq_0Dviewer_PyRPL import (
-    DAQ_0DViewer_PyRPL, MockPyRPLConnection
+    DAQ_0DViewer_PyRPL,
 )
 from pymodaq_plugins_pyrpl.models.PIDModelPyRPL import PIDModelPyRPL
+from pymodaq_plugins_pyrpl.utils.pyrpl_wrapper import (
+    PyRPLMockConnectionAdapter,
+    create_pyrpl_connection,
+    reset_shared_mock_instance,
+)
 
 # PyMoDAQ imports for data structures
 from pymodaq_utils.utils import ThreadCommand
@@ -207,6 +212,7 @@ def mock_move_plugin():
 @pytest.fixture
 def mock_viewer_plugin():
     """Create a mock viewer plugin instance."""
+    reset_shared_mock_instance()
     plugin = DAQ_0DViewer_PyRPL()
     plugin.ini_attributes()
     return plugin
@@ -744,12 +750,17 @@ class TestDAQ0DViewerPyRPL:
             
             assert success is True
             assert "Mock PyRPL connection" in info
-            assert isinstance(mock_viewer_plugin.controller, MockPyRPLConnection)
+            assert isinstance(mock_viewer_plugin.controller, PyRPLMockConnectionAdapter)
 
     def test_mock_data_acquisition(self, mock_viewer_plugin):
         """Test data acquisition with mock connection."""
         # Setup mock connection and enable all channels
-        mock_viewer_plugin.controller = MockPyRPLConnection(TEST_HOSTNAME)
+        mock_viewer_plugin.controller = create_pyrpl_connection(
+            TEST_HOSTNAME,
+            "viewer_mock_config",
+            mock_mode=True,
+        )
+        assert isinstance(mock_viewer_plugin.controller, PyRPLMockConnectionAdapter)
         mock_viewer_plugin.settings.child('channels', 'monitor_in1').setValue(True)
         mock_viewer_plugin.settings.child('channels', 'monitor_in2').setValue(True)
         mock_viewer_plugin.settings.child('channels', 'monitor_pid').setValue(True)
@@ -772,7 +783,12 @@ class TestDAQ0DViewerPyRPL:
     def test_grab_data_functionality(self, mock_viewer_plugin):
         """Test grab_data method with mock connection."""
         # Setup mock connection and channels
-        mock_viewer_plugin.controller = MockPyRPLConnection(TEST_HOSTNAME)
+        mock_viewer_plugin.controller = create_pyrpl_connection(
+            TEST_HOSTNAME,
+            "viewer_grab_config",
+            mock_mode=True,
+        )
+        assert isinstance(mock_viewer_plugin.controller, PyRPLMockConnectionAdapter)
         mock_viewer_plugin.active_channels = ['Input 1 (V)']
         
         # Mock the data emission
@@ -1108,7 +1124,12 @@ class TestPerformance:
     def test_data_acquisition_throughput(self, mock_viewer_plugin):
         """Test viewer data acquisition throughput."""
         # Setup mock connection
-        mock_viewer_plugin.controller = MockPyRPLConnection(TEST_HOSTNAME)
+        mock_viewer_plugin.controller = create_pyrpl_connection(
+            TEST_HOSTNAME,
+            "viewer_structure_config",
+            mock_mode=True,
+        )
+        assert isinstance(mock_viewer_plugin.controller, PyRPLMockConnectionAdapter)
         mock_viewer_plugin.active_channels = ['Input 1 (V)', 'Input 2 (V)']
         
         # Mock data emission

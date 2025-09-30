@@ -15,18 +15,27 @@ PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
 
 .. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
     :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
-=======
-.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/workflows/Upload%20Python%20Package/badge.svg
-   :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl
-   :alt: Publication Status
 
-.. image:: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml/badge.svg
-    :target: https://github.com/TheFermiSea/pymodaq_plugins_pyrpl/actions/workflows/Test.yml
+This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ for advanced measurement and control applications. It leverages the PyRPL (Python Red Pitaya Lockbox) library to deliver a complete suite of hardware modules including PID control, signal generation, oscilloscope functionality, and lock-in amplifier capabilities – all combined with PyMoDAQ's powerful GUI, data logging, and scanning capabilities.
 
-This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ for advanced measurement and control applications. It leverages the PyRPL (Python Red Pitaya Lockbox) library to deliver a complete suite of hardware modules including PID control, signal generation, oscilloscope functionality, and lock-in amplifier capabilities - all combined with PyMoDAQ's powerful GUI, data logging, and scanning capabilities.
+Documentation
+-------------
 
-This plugin is intended to recreate the PyRPL package in PyMoDAQ as a plugin.
-=======
+**Complete documentation:** `docs/ <docs/>`_
+
+* **Getting Started:**
+  
+  * `Installation guide <docs/INSTALLATION.md>`_
+  * `Hardware testing guide <docs/HARDWARE_TESTING.md>`_ - **Read this first for hardware setup!**
+  * `Mock mode tutorial <docs/MOCK_TUTORIAL.md>`_
+
+* **Advanced:**
+  
+  * `Developer guide <docs/DEVELOPER_GUIDE.md>`_
+  * `Control theory foundations <docs/CONTROL_THEORY_FOUNDATIONS.md>`_
+
+* **Important:** PyRPL 0.9.6.0 has critical bugs that must be patched. See `Hardware Testing Guide <docs/HARDWARE_TESTING.md#pyrpl-bug-fixes>`_ for fixes.
+
 Key Features
 ============
 
@@ -37,6 +46,7 @@ Key Features
 * **Thread-Safe Architecture**: Centralized PyRPL wrapper with connection pooling prevents conflicts
 * **Advanced Signal Processing**: Lock-in amplifier, oscilloscope, and arbitrary signal generation capabilities
 * **Mock Mode**: Complete development and testing environment without physical hardware
+* **Enhanced Mock Simulation**: Scope viewer now offers selectable waveforms with realistic noise profiles
 * **Comprehensive Testing**: 50+ automated tests covering all plugins and integration scenarios
 * **Professional Integration**: Production-ready solution for research and industrial applications
 * **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (rp-f08d6c.local, August 2025)
@@ -51,7 +61,7 @@ This plugin provides a comprehensive suite of Red Pitaya hardware modules:
 **PID Controllers & Models**
 ++++++++++++++++++++++++++++
 
-* **PIDModelPyrpl**: Direct PyRPL PID model for PyMoDAQ PID extension
+* **PIDModelPyRPL**: Direct PyRPL PID model for PyMoDAQ PID extension
 
   - Hardware PID control bypassing external actuators/detectors
   - Direct Red Pitaya communication for minimal latency
@@ -219,17 +229,14 @@ Network Configuration
 
 4. **PyRPL Connection**: The plugin uses PyRPL's SSH-based connection (port 22), not SCPI
 
-   **Hardware Validation (August 2025)**: Successfully validated with real Red Pitaya hardware:
+   **Hardware Validated (January 2025)**: Comprehensive validation with real Red Pitaya:
    
-   - ✅ Tested with Red Pitaya STEMlab at rp-f08d6c.local
-   - ✅ All 5 plugin types working: PID, ASG, Scope, IQ, Voltage Monitor
-   - ✅ Real-time data acquisition and control confirmed
-   - ✅ Python 3.12 + PyQt5 compatibility established
-   - ✅ PyRPL compatibility fixes implemented:
-     - collections.Mapping deprecation fixed
-     - np.complex deprecation handled
-     - Qt timer float/int compatibility resolved
-     - ZeroDivisionError handling for PyRPL quirks
+   - ✅ Red Pitaya STEMlab at 100.107.106.75
+   - ✅ All 8 hardware modules verified: PID×3, ASG×2, Scope, IQ, Sampler
+   - ✅ PyRPL 0.9.6.0 bugs identified and patched
+   - ✅ Python 3.11/3.12 + PyQt5/PyQt6 compatibility confirmed
+   - ✅ PID module ready for production use
+   - ⚠️ **Important:** PyRPL 0.9.6.0 requires bug patches (see documentation)
 
 Physical Connections
 ++++++++++++++++++++
@@ -338,6 +345,7 @@ Enable mock mode for development without hardware:
 Mock mode provides:
 
 * Simulated voltage readings with realistic noise
+* Selectable waveform models in the scope viewer (damped sine, square, broadband noise)
 * PID setpoint simulation
 * Full plugin functionality for GUI development
 * Automated testing capabilities
@@ -420,12 +428,11 @@ Use the PID model for direct hardware control in PyMoDAQ PID extension:
 .. code-block:: python
 
    from pymodaq.extensions.pid import PIDController
-   from pymodaq_plugins_pyrpl.models.PIDModelPyrpl import PIDModelPyrpl
-   
+   from pymodaq_plugins_pyrpl.models.PIDModelPyRPL import PIDModelPyRPL
+
    # Initialize PID with PyRPL hardware model
    pid_controller = PIDController()
-   pid_controller.model = PIDModelPyrpl(pid_controller)
-   
+   pid_controller.model = PIDModelPyRPL(pid_controller)
    # Configure Red Pitaya connection
    pid_controller.model_params['redpitaya_host'] = 'rp-f08d6c.local'  # Verified IP
    pid_controller.model_params['config_name'] = 'pymodaq_pid'
@@ -543,6 +550,7 @@ Performance Optimization
 * Minimize sampling rates for viewer plugins when not needed
 * Use appropriate P, I, D gains for your specific system
 * Consider network latency in your control loop design
+* Leverage the dashboard extension’s signal-driven updates when monitoring many devices simultaneously
 
 Safety Considerations
 =====================

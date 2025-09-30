@@ -68,8 +68,13 @@ from pymodaq_data import DataRaw, Axis
 
 # Import PyRPL wrapper utilities
 from ...utils.pyrpl_wrapper import (
-    PyRPLManager, PyRPLConnection, IQChannel, InputChannel,
-    IQConfiguration, IQOutputDirect, ConnectionState
+    PyRPLManager,
+    PyRPLConnection,
+    PyRPLMockConnectionAdapter,
+    IQChannel,
+    InputChannel,
+    IQConfiguration,
+    IQOutputDirect,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,48 +113,6 @@ class MockIQMeasurement:
         q_total = signal_q + noise_q + drift_q
 
         return i_total, q_total
-
-
-class MockPyRPLConnection:
-    """Mock connection for development without hardware."""
-
-    def __init__(self, hostname: str):
-        self.hostname = hostname
-        self.is_connected = True
-        self.state = ConnectionState.CONNECTED
-        self._iq_measurements: Dict[IQChannel, MockIQMeasurement] = {}
-
-    def configure_iq(self, channel: IQChannel, config: IQConfiguration) -> bool:
-        """Mock IQ configuration."""
-        self._iq_measurements[channel] = MockIQMeasurement(
-            frequency=config.frequency,
-            phase_offset=config.phase
-        )
-        return True
-
-    def get_iq_measurement(self, channel: IQChannel) -> Optional[Tuple[float, float]]:
-        """Return mock I/Q measurements."""
-        if channel not in self._iq_measurements:
-            self._iq_measurements[channel] = MockIQMeasurement()
-        return self._iq_measurements[channel].get_iq_values()
-
-    def calculate_magnitude_phase(self, i: float, q: float) -> Tuple[float, float]:
-        """Calculate magnitude and phase from I and Q components."""
-        magnitude = np.sqrt(i**2 + q**2)
-        phase_radians = np.arctan2(q, i)
-        phase_degrees = np.degrees(phase_radians)
-        return magnitude, phase_degrees
-
-    def set_iq_frequency(self, channel: IQChannel, frequency: float) -> bool:
-        """Mock frequency setting."""
-        if channel in self._iq_measurements:
-            self._iq_measurements[channel].frequency = frequency
-        return True
-
-    def disconnect(self, status_callback=None):
-        """Mock disconnect."""
-        self.is_connected = False
-
 
 class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
     """
@@ -413,7 +376,7 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
 
     def ini_attributes(self):
         """Initialize plugin attributes."""
-        self.controller: Optional[Union[PyRPLConnection, MockPyRPLConnection]] = None
+        self.controller: Optional[Union[PyRPLConnection, PyRPLMockConnectionAdapter]] = None
         self.pyrpl_manager: Optional[PyRPLManager] = None
         self.last_acquisition_time: float = 0.0
 
@@ -542,10 +505,7 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
 
             self.iq_config = self._create_iq_configuration()
 
-            if isinstance(self.controller, MockPyRPLConnection):
-                success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
-            else:
-                success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
+            success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
 
             if success:
                 logger.info(f"Reconfigured IQ module {iq_module_str}")
@@ -564,10 +524,7 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
         try:
             self.iq_config = self._create_iq_configuration()
 
-            if isinstance(self.controller, MockPyRPLConnection):
-                success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
-            else:
-                success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
+            success = self.controller.configure_iq(self.current_iq_channel, self.iq_config)
 
             if success:
                 logger.debug("Updated IQ parameters")
@@ -595,36 +552,30 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
                 mock_mode = self.settings['connection', 'mock_mode']
                 hostname = self.settings['connection', 'redpitaya_host']
 
-                if mock_mode:
-                    # Use mock connection for development
-                    self.controller = MockPyRPLConnection(hostname)
-                    info = f"Mock PyRPL IQ connection established for {hostname}"
-                    logger.info(info)
+                if self.pyrpl_manager is None:
+                    self.pyrpl_manager = PyRPLManager.get_instance()
 
-                else:
-                    # Use real PyRPL connection
-                    self.pyrpl_manager = PyRPLManager()
+                config_name = self.settings['connection', 'config_name']
+                timeout = self.settings['connection', 'connection_timeout']
 
-                    config_name = self.settings['connection', 'config_name']
-                    timeout = self.settings['connection', 'connection_timeout']
+                self.controller = self.pyrpl_manager.connect_device(
+                    hostname=hostname,
+                    config_name=config_name,
+                    connection_timeout=timeout,
+                    status_callback=self.emit_status,
+                    mock_mode=mock_mode,
+                )
 
-                    # Connect to Red Pitaya
-                    self.controller = self.pyrpl_manager.connect_device(
-                        hostname=hostname,
-                        config_name=config_name,
-                        connection_timeout=timeout,
-                        status_callback=self.emit_status
-                    )
+                if self.controller is None or not getattr(self.controller, "is_connected", False):
+                    error_msg = f"Failed to connect to Red Pitaya at {hostname}"
+                    if hasattr(self.controller, "last_error") and self.controller.last_error:
+                        error_msg += f": {self.controller.last_error}"
+                    logger.error(error_msg)
+                    return error_msg, False
 
-                    if self.controller is None or not self.controller.is_connected:
-                        error_msg = f"Failed to connect to Red Pitaya at {hostname}"
-                        if self.controller and self.controller.last_error:
-                            error_msg += f": {self.controller.last_error}"
-                        logger.error(error_msg)
-                        return error_msg, False
-
-                    info = f"Connected to Red Pitaya {hostname} ({config_name})"
-                    logger.info(info)
+                mode_label = "Mock" if mock_mode else "Real"
+                info = f"{mode_label} PyRPL IQ connection established for {hostname} ({config_name})"
+                logger.info(info)
             else:
                 # Slave mode: use provided controller
                 self.controller = controller
@@ -819,7 +770,7 @@ class DAQ_0DViewer_PyRPL_IQ(DAQ_Viewer_base):
                 self.current_iq_channel is not None):
 
                 try:
-                    if not isinstance(self.controller, MockPyRPLConnection):
+                    if hasattr(self.controller, "enable_iq_output"):
                         self.controller.enable_iq_output(self.current_iq_channel, IQOutputDirect.OFF)
                         logger.debug("Disabled IQ output before closing")
                 except Exception as e:
