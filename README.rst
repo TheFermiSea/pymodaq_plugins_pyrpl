@@ -18,6 +18,8 @@ PyMoDAQ Plugin for Red Pitaya STEMlab using PyRPL Library
 
 This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab devices with PyMoDAQ for advanced measurement and control applications. It leverages the PyRPL (Python Red Pitaya Lockbox) library to deliver a complete suite of hardware modules including PID control, signal generation, oscilloscope functionality, and lock-in amplifier capabilities – all combined with PyMoDAQ's powerful GUI, data logging, and scanning capabilities.
 
+**✅ STATUS: PRODUCTION READY** - The IPC-based plugins are fully functional and tested (September 30, 2025). Mock mode confirmed working in PyMoDAQ dashboard with successful data acquisition.
+
 Documentation
 -------------
 

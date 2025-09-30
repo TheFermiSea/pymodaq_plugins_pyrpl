@@ -698,6 +698,8 @@ class PyRPLConnection:
         """
         Configure a PID controller with the specified parameters.
 
+        CRITICAL: Never stores PID QObject. Direct attribute access to avoid recursion.
+
         Args:
             channel: PID channel to configure
             config: PID configuration parameters
@@ -711,29 +713,19 @@ class PyRPLConnection:
                 return False
 
             try:
-                pid_module = self.get_pid_module(channel)
-                if pid_module is None:
-                    return False
-
                 # Store configuration
                 self._pid_configs[channel] = config
 
-                # Configure PID parameters
-                pid_module.setpoint = config.setpoint
-                pid_module.p = config.p_gain
-                pid_module.i = config.i_gain
-                pid_module.d = config.d_gain
-
-                # Configure input/output routing
-                pid_module.input = config.input_channel.value
-                if config.enabled:
-                    pid_module.output_direct = config.output_channel.value
-                else:
-                    pid_module.output_direct = 'off'
-
-                # Set voltage limits
-                pid_module.max_voltage = config.voltage_limit_max
-                pid_module.min_voltage = config.voltage_limit_min
+                # Configure PID parameters - direct access without storing QObject
+                pid = getattr(self._redpitaya, channel.value)
+                pid.setpoint = config.setpoint
+                pid.p = config.p_gain
+                pid.i = config.i_gain
+                pid.d = config.d_gain
+                pid.input = config.input_channel.value
+                pid.output_direct = config.output_channel.value if config.enabled else 'off'
+                pid.max_voltage = config.voltage_limit_max
+                pid.min_voltage = config.voltage_limit_min
 
                 logger.debug(f"Configured PID {channel.value} with setpoint {config.setpoint}")
                 return True
@@ -1123,6 +1115,8 @@ class PyRPLConnection:
         """
         Configure the scope with the specified parameters.
 
+        CRITICAL: Never stores scope QObject. Direct attribute access to avoid recursion.
+
         Args:
             config: Scope configuration parameters
 
@@ -1135,23 +1129,17 @@ class PyRPLConnection:
                 return False
 
             try:
-                scope = self.get_scope_module()
-                if scope is None:
-                    return False
-
                 # Store configuration
                 self._scope_config = config
 
-                # Configure scope parameters
-                scope.decimation = config.decimation.value
-                scope.trigger_source = config.trigger_source.value
-                scope.trigger_delay = config.trigger_delay
-                scope.trigger_level = config.trigger_level
-                scope.average = config.average
-                scope.rolling_mode = config.rolling_mode
-
-                # Set input channel
-                scope.input = config.input_channel.value
+                # Configure scope parameters - direct access, no intermediate variable
+                self._redpitaya.scope.decimation = config.decimation.value
+                self._redpitaya.scope.trigger_source = config.trigger_source.value
+                self._redpitaya.scope.trigger_delay = config.trigger_delay
+                self._redpitaya.scope.trigger_level = config.trigger_level
+                self._redpitaya.scope.average = config.average
+                self._redpitaya.scope.rolling_mode = config.rolling_mode
+                self._redpitaya.scope.input = config.input_channel.value
 
                 logger.debug(f"Configured scope with decimation {config.decimation.value}")
                 return True
@@ -1163,6 +1151,9 @@ class PyRPLConnection:
     def acquire_scope_data(self, timeout: Optional[float] = None) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
         Acquire data from the scope.
+
+        CRITICAL: Never stores scope QObject reference. Each operation gets fresh reference
+        to avoid Qt metaobject recursion.
 
         Args:
             timeout: Optional timeout in seconds (uses config timeout if None)
@@ -1179,30 +1170,30 @@ class PyRPLConnection:
                 return None
 
             try:
-                scope = self.get_scope_module()
-                if scope is None:
-                    return None
-
                 # Use config timeout if not specified
                 acq_timeout = timeout if timeout is not None else self._scope_config.timeout
 
-                # Start acquisition
+                # Start acquisition - get fresh reference, call method, discard
                 start_time = time.time()
-                scope.trigger()
+                self._redpitaya.scope.trigger()
 
                 # Wait for acquisition to complete
-                while not scope.stopped():
+                while True:
                     if time.time() - start_time > acq_timeout:
                         logger.error(f"Scope acquisition timeout ({acq_timeout}s)")
                         return None
+                    
+                    # Check if stopped - fresh reference each time
+                    if self._redpitaya.scope.stopped():
+                        break
+                    
                     time.sleep(0.001)  # 1ms polling interval
 
-                # Get data
-                voltage_data = scope.curve()
-
-                # Generate time axis
-                sampling_time = scope.sampling_time
-                duration = scope.duration
+                # Get data - fresh references for each access
+                voltage_data = self._redpitaya.scope.curve()
+                sampling_time = self._redpitaya.scope.sampling_time
+                duration = self._redpitaya.scope.duration
+                
                 data_length = len(voltage_data)
                 time_axis = np.linspace(0, duration, data_length)
 
