@@ -55,34 +55,14 @@ from pymodaq_data import DataRaw, Axis
 
 # Import PyRPL wrapper utilities
 from ...utils.pyrpl_wrapper import (
-    PyRPLManager, PyRPLConnection, PIDChannel, InputChannel,
-    ConnectionState
+    PyRPLManager,
+    PyRPLConnection,
+    PyRPLMockConnectionAdapter,
+    PIDChannel,
+    InputChannel,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MockPyRPLConnection:
-    """Mock connection for development without hardware."""
-
-    def __init__(self, hostname: str):
-        self.hostname = hostname
-        self.is_connected = True
-        self.state = ConnectionState.CONNECTED
-
-    def read_voltage(self, channel: InputChannel) -> float:
-        """Return mock voltage readings with realistic variations."""
-        base_voltage = 0.5 if channel == InputChannel.IN1 else 0.3
-        noise = np.random.normal(0, 0.01)  # 10mV noise
-        return base_voltage + noise
-
-    def get_pid_setpoint(self, channel: PIDChannel) -> float:
-        """Return mock PID setpoint."""
-        return 0.5 + np.random.normal(0, 0.001)  # 1mV noise
-
-    def disconnect(self, status_callback=None):
-        """Mock disconnect."""
-        self.is_connected = False
 
 
 class DAQ_0DViewer_PyRPL(DAQ_Viewer_base):
@@ -207,7 +187,7 @@ class DAQ_0DViewer_PyRPL(DAQ_Viewer_base):
 
     def ini_attributes(self):
         """Initialize plugin attributes."""
-        self.controller: Optional[Union[PyRPLConnection, MockPyRPLConnection]] = None
+        self.controller: Optional[Union[PyRPLConnection, PyRPLMockConnectionAdapter]] = None
         self.pyrpl_manager: Optional[PyRPLManager] = None
         self.last_acquisition_time: float = 0.0
 
@@ -279,36 +259,30 @@ class DAQ_0DViewer_PyRPL(DAQ_Viewer_base):
                 mock_mode = self.settings['connection', 'mock_mode']
                 hostname = self.settings['connection', 'redpitaya_host']
 
-                if mock_mode:
-                    # Use mock connection for development
-                    self.controller = MockPyRPLConnection(hostname)
-                    info = f"Mock PyRPL connection established for {hostname}"
-                    logger.info(info)
+                if self.pyrpl_manager is None:
+                    self.pyrpl_manager = PyRPLManager.get_instance()
 
-                else:
-                    # Use real PyRPL connection
-                    self.pyrpl_manager = PyRPLManager()
+                config_name = self.settings['connection', 'config_name']
+                timeout = self.settings['connection', 'connection_timeout']
 
-                    config_name = self.settings['connection', 'config_name']
-                    timeout = self.settings['connection', 'connection_timeout']
+                self.controller = self.pyrpl_manager.connect_device(
+                    hostname=hostname,
+                    config_name=config_name,
+                    connection_timeout=timeout,
+                    status_callback=self.emit_status,
+                    mock_mode=mock_mode,
+                )
 
-                    # Connect to Red Pitaya
-                    self.controller = self.pyrpl_manager.connect_device(
-                        hostname=hostname,
-                        config_name=config_name,
-                        connection_timeout=timeout,
-                        status_callback=self.emit_status
-                    )
+                if self.controller is None or not getattr(self.controller, "is_connected", False):
+                    error_msg = f"Failed to connect to Red Pitaya at {hostname}"
+                    if hasattr(self.controller, "last_error") and self.controller.last_error:
+                        error_msg += f": {self.controller.last_error}"
+                    logger.error(error_msg)
+                    return error_msg, False
 
-                    if self.controller is None or not self.controller.is_connected:
-                        error_msg = f"Failed to connect to Red Pitaya at {hostname}"
-                        if self.controller and self.controller.last_error:
-                            error_msg += f": {self.controller.last_error}"
-                        logger.error(error_msg)
-                        return error_msg, False
-
-                    info = f"Connected to Red Pitaya {hostname} ({config_name})"
-                    logger.info(info)
+                mode_label = "Mock" if mock_mode else "Real"
+                info = f"{mode_label} PyRPL connection established for {hostname} ({config_name})"
+                logger.info(info)
             else:
                 # Slave mode: use provided controller
                 self.controller = controller
@@ -385,10 +359,7 @@ class DAQ_0DViewer_PyRPL(DAQ_Viewer_base):
                 pid_module_name = self.settings['channels', 'pid_module']
                 pid_channel = PIDChannel(pid_module_name)
 
-                if isinstance(self.controller, MockPyRPLConnection):
-                    setpoint = self.controller.get_pid_setpoint(pid_channel)
-                else:
-                    setpoint = self.controller.get_pid_setpoint(pid_channel)
+                setpoint = self.controller.get_pid_setpoint(pid_channel)
 
                 if setpoint is not None:
                     data[f'PID {pid_module_name.upper()} Setpoint (V)'] = setpoint

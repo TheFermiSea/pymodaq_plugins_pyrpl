@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+from qtpy.QtCore import QObject, Signal
 
 # Set up logger early
 logger = logging.getLogger(__name__)
@@ -116,6 +117,43 @@ from pymodaq_utils.utils import ThreadCommand
 
 
 logger = logging.getLogger(__name__)
+
+
+ENHANCED_MOCK_AVAILABLE: Optional[bool] = None
+EnhancedMockPyRPLConnection = None  # type: ignore[assignment]
+create_enhanced_mock_connection = None  # type: ignore[assignment]
+
+
+def _ensure_enhanced_mock_loaded() -> bool:
+    """Lazy import for enhanced mock connection support."""
+
+    global ENHANCED_MOCK_AVAILABLE, EnhancedMockPyRPLConnection, create_enhanced_mock_connection
+
+    if ENHANCED_MOCK_AVAILABLE is not None:
+        return ENHANCED_MOCK_AVAILABLE
+
+    try:
+        from .enhanced_mock_connection import (  # type: ignore
+            EnhancedMockPyRPLConnection as _EnhancedMockPyRPLConnection,
+            create_enhanced_mock_connection as _create_enhanced_mock_connection,
+        )
+
+        EnhancedMockPyRPLConnection = _EnhancedMockPyRPLConnection
+        create_enhanced_mock_connection = _create_enhanced_mock_connection
+        ENHANCED_MOCK_AVAILABLE = True
+        logger.info("Enhanced mock connection support available")
+    except Exception as exc:  # noqa: BLE001 - optional dependency
+        ENHANCED_MOCK_AVAILABLE = False
+        EnhancedMockPyRPLConnection = None
+        create_enhanced_mock_connection = None
+        logger.warning("Enhanced mock connection unavailable: %s", exc)
+
+    return ENHANCED_MOCK_AVAILABLE
+
+
+_shared_mock_lock = threading.Lock()
+_shared_mock_instance = None
+_shared_mock_hostname: Optional[str] = None
 
 
 class ConnectionState(Enum):
@@ -291,6 +329,58 @@ class ConnectionInfo:
     connection_timeout: float = 10.0
     retry_attempts: int = 3
     retry_delay: float = 1.0
+
+
+class PyRPLMockConnectionAdapter:
+    """Adapter exposing mock connections with PyRPLConnection-like interface."""
+
+    def __init__(self, mock_instance: Any, hostname: str, config_name: str):
+        self._mock_instance = mock_instance
+        self.hostname = hostname
+        self.config_name = config_name
+        self.is_mock = True
+        self.is_connected = True
+        self._reference_count = 1
+
+    def add_reference(self) -> int:
+        self._reference_count += 1
+        return self._reference_count
+
+    def remove_reference(self) -> int:
+        if self._reference_count > 0:
+            self._reference_count -= 1
+        return self._reference_count
+
+    def disconnect(self, status_callback: Optional[callable] = None) -> None:
+        remaining = self.remove_reference()
+        if remaining <= 0:
+            self.is_connected = False
+            if hasattr(self._mock_instance, "disconnect"):
+                try:
+                    self._mock_instance.disconnect(status_callback)
+                except Exception as exc:  # noqa: BLE001 - best effort cleanup
+                    logger.debug("Mock disconnect raised: %s", exc)
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        info: Dict[str, Any] = {
+            "hostname": self.hostname,
+            "config_name": self.config_name,
+            "adapter_type": "PyRPLMockConnectionAdapter",
+            "reference_count": self._reference_count,
+            "is_mock": True,
+            "is_connected": self.is_connected,
+        }
+        if hasattr(self._mock_instance, "get_connection_info"):
+            try:
+                mock_info = self._mock_instance.get_connection_info()
+                if isinstance(mock_info, dict):
+                    info.update(mock_info)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to retrieve mock connection info: %s", exc)
+        return info
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._mock_instance, item)
 
 
 class PyRPLConnection:
@@ -1519,7 +1609,7 @@ class PyRPLConnection:
         pass
 
 
-class PyRPLManager:
+class PyRPLManager(QObject):
     """
     Singleton manager for PyRPL connections.
 
@@ -1527,6 +1617,7 @@ class PyRPLManager:
     multiple PyMoDAQ plugins accessing the same Red Pitaya devices.
     """
 
+    status_updated = Signal(dict)
     _instance: Optional['PyRPLManager'] = None
     _lock = threading.Lock()
 
@@ -1544,7 +1635,9 @@ class PyRPLManager:
         if self._initialized:
             return
 
+        super().__init__()
         self._connections: Dict[str, PyRPLConnection] = {}
+        self._mock_connections: Dict[str, PyRPLMockConnectionAdapter] = {}
         self._manager_lock = threading.RLock()
         self._initialized = True
 
@@ -1603,15 +1696,64 @@ class PyRPLManager:
         Returns:
             Connected PyRPLConnection instance or None if failed
         """
+        mock_mode = connection_kwargs.pop("mock_mode", False)
+
+        if mock_mode:
+            return self._connect_mock_device(
+                hostname, config_name, status_callback=status_callback, **connection_kwargs
+            )
+
+        connection_key = f"{hostname}:{config_name}"
         connection = self.get_connection(hostname, config_name, **connection_kwargs)
 
         if connection is None:
+            self.status_updated.emit(self.get_manager_status())
             return None
 
         if connection.connect(status_callback):
+            self.status_updated.emit(self.get_manager_status())
             return connection
-        else:
+
+        with self._manager_lock:
+            self._connections.pop(connection_key, None)
+
+        self.status_updated.emit(self.get_manager_status())
+        return None
+
+    def _connect_mock_device(
+        self,
+        hostname: str,
+        config_name: str,
+        status_callback: Optional[callable] = None,
+        **_: Any,
+    ) -> Optional[PyRPLMockConnectionAdapter]:
+        if not _ensure_enhanced_mock_loaded():
+            logger.error("Mock mode requested but enhanced mock support unavailable")
             return None
+
+        mock_instance = get_shared_mock_instance(hostname)
+        if mock_instance is None:
+            logger.error("Failed to create shared mock instance for %s", hostname)
+            return None
+
+        connection_key = f"{hostname}:{config_name}"
+
+        with self._manager_lock:
+            adapter = self._mock_connections.get(connection_key)
+            if adapter is None:
+                adapter = PyRPLMockConnectionAdapter(mock_instance, hostname, config_name)
+                self._mock_connections[connection_key] = adapter
+            else:
+                adapter.add_reference()
+
+        if status_callback:
+            try:
+                status_callback(ThreadCommand("Update_Status", [f"Connected to mock {hostname}", "log"]))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Status callback for mock connection failed: %s", exc)
+
+        self.status_updated.emit(self.get_manager_status())
+        return adapter
 
     def disconnect_device(self, hostname: str, config_name: str = "pymodaq",
                          status_callback: Optional[callable] = None) -> bool:
@@ -1629,7 +1771,16 @@ class PyRPLManager:
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
 
+            if connection_key in self._mock_connections:
+                adapter = self._mock_connections[connection_key]
+                adapter.disconnect(status_callback)
+                if adapter._reference_count <= 0:
+                    del self._mock_connections[connection_key]
+                self.status_updated.emit(self.get_manager_status())
+                return True
+
             if connection_key not in self._connections:
+                self.status_updated.emit(self.get_manager_status())
                 return True  # Already disconnected
 
             connection = self._connections[connection_key]
@@ -1639,6 +1790,7 @@ class PyRPLManager:
                 logger.warning(f"Connection {hostname} still has active references, disconnecting anyway")
 
             connection.disconnect(status_callback)
+            self.status_updated.emit(self.get_manager_status())
             return True
 
     def remove_connection(self, hostname: str, config_name: str = "pymodaq") -> bool:
@@ -1655,6 +1807,12 @@ class PyRPLManager:
         with self._manager_lock:
             connection_key = f"{hostname}:{config_name}"
 
+            if connection_key in self._mock_connections:
+                adapter = self._mock_connections.pop(connection_key)
+                adapter.disconnect()
+                self.status_updated.emit(self.get_manager_status())
+                return True
+
             if connection_key in self._connections:
                 connection = self._connections[connection_key]
 
@@ -1664,11 +1822,13 @@ class PyRPLManager:
 
                 del self._connections[connection_key]
                 logger.info(f"Removed connection to {hostname}")
+                self.status_updated.emit(self.get_manager_status())
                 return True
 
+            self.status_updated.emit(self.get_manager_status())
             return False
 
-    def get_all_connections(self) -> Dict[str, PyRPLConnection]:
+    def get_all_connections(self) -> Dict[str, Any]:
         """
         Get all active connections.
 
@@ -1676,7 +1836,10 @@ class PyRPLManager:
             Dictionary mapping connection keys to PyRPLConnection instances
         """
         with self._manager_lock:
-            return self._connections.copy()
+            combined: Dict[str, Any] = {}
+            combined.update(self._connections)
+            combined.update(self._mock_connections)
+            return combined
 
     def disconnect_all(self, status_callback: Optional[callable] = None) -> None:
         """
@@ -1692,6 +1855,15 @@ class PyRPLManager:
                 except Exception as e:
                     logger.error(f"Error disconnecting {connection_key}: {e}")
 
+            for connection_key, adapter in list(self._mock_connections.items()):
+                try:
+                    adapter.disconnect(status_callback)
+                except Exception as e:
+                    logger.error(f"Error disconnecting mock {connection_key}: {e}")
+                finally:
+                    if adapter._reference_count <= 0:
+                        self._mock_connections.pop(connection_key, None)
+
     def cleanup(self) -> None:
         """
         Clean up all connections and resources.
@@ -1701,6 +1873,7 @@ class PyRPLManager:
 
         with self._manager_lock:
             self._connections.clear()
+            self._mock_connections.clear()
 
     def get_manager_status(self) -> Dict[str, Any]:
         """
@@ -1713,9 +1886,11 @@ class PyRPLManager:
             connections_info = {}
             for key, conn in self._connections.items():
                 connections_info[key] = conn.get_connection_info()
+            for key, adapter in self._mock_connections.items():
+                connections_info[f"mock::{key}"] = adapter.get_connection_info()
 
             return {
-                'total_connections': len(self._connections),
+                'total_connections': len(self._connections) + len(self._mock_connections),
                 'connections': connections_info
             }
 
@@ -1729,6 +1904,90 @@ class PyRPLManager:
 def get_pyrpl_manager() -> PyRPLManager:
     """Get the global PyRPL manager instance."""
     return PyRPLManager.get_instance()
+
+
+def get_shared_mock_instance(hostname: str) -> Optional[Any]:
+    """Return the shared enhanced mock instance, creating it if needed."""
+
+    if not _ensure_enhanced_mock_loaded():
+        return None
+
+    global _shared_mock_instance, _shared_mock_hostname
+
+    with _shared_mock_lock:
+        if _shared_mock_instance is None:
+            if create_enhanced_mock_connection is None:
+                return None
+            _shared_mock_instance = create_enhanced_mock_connection(hostname)
+            _shared_mock_hostname = hostname
+        return _shared_mock_instance
+
+
+def reset_shared_mock_instance() -> None:
+    """Reset the shared mock instance and clear cached adapters."""
+
+    if not _ensure_enhanced_mock_loaded():
+        return
+
+    global _shared_mock_instance, _shared_mock_hostname
+
+    with _shared_mock_lock:
+        if ENHANCED_MOCK_AVAILABLE and EnhancedMockPyRPLConnection is not None:
+            try:
+                EnhancedMockPyRPLConnection.reset_all_simulations()
+                EnhancedMockPyRPLConnection._instances.clear()  # type: ignore[attr-defined]
+                EnhancedMockPyRPLConnection._simulation_engine = None  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Enhanced mock reset reported: %s", exc)
+        _shared_mock_instance = None
+        _shared_mock_hostname = None
+
+    manager = PyRPLManager.get_instance()
+    with manager._manager_lock:  # type: ignore[attr-defined]
+        manager._mock_connections.clear()  # type: ignore[attr-defined]
+
+
+def get_mock_instance_info() -> Dict[str, Any]:
+    """Return metadata about the shared mock instance if present."""
+
+    info = {
+        "exists": False,
+        "hostname": None,
+        "enhanced_available": _ensure_enhanced_mock_loaded(),
+    }
+
+    global _shared_mock_instance, _shared_mock_hostname
+    with _shared_mock_lock:
+        if _shared_mock_instance is not None:
+            info["exists"] = True
+            info["hostname"] = _shared_mock_hostname
+            if hasattr(_shared_mock_instance, "get_connection_info"):
+                try:
+                    extra = _shared_mock_instance.get_connection_info()
+                    if isinstance(extra, dict):
+                        info.update(extra)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Failed to obtain mock instance info: %s", exc)
+
+    return info
+
+
+def create_pyrpl_connection(
+    hostname: str,
+    config_name: str = "pymodaq",
+    *,
+    mock_mode: bool = False,
+    **kwargs: Any,
+) -> Optional[Any]:
+    """Factory function used by tests to create PyRPL connections."""
+
+    manager = PyRPLManager.get_instance()
+    return manager.connect_device(
+        hostname,
+        config_name,
+        mock_mode=mock_mode,
+        **kwargs,
+    )
 
 
 def connect_redpitaya(hostname: str, config_name: str = "pymodaq",

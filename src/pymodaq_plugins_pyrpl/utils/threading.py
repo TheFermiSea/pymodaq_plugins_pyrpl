@@ -1,26 +1,18 @@
 # -*- coding: utf-8 -*-
-"""
-Advanced Threading Utilities for PyMoDAQ PyRPL Plugins
+"""Threading helpers that respect PyMoDAQ's Qt event loop precedence."""
 
-This module provides enhanced threading support for PyRPL plugins using PyMoDAQ's
-ThreadCommand system. It includes thread pools, async hardware operations, and
-proper error handling while maintaining GUI responsiveness.
+from __future__ import annotations
 
-Classes:
-    ThreadedHardwareManager: Manages threaded hardware operations
-    AsyncDataAcquisition: Asynchronous data acquisition with cancellation
-    ThreadSafeQueue: Thread-safe queue for hardware commands
-"""
-
-import logging
-import threading
-import queue
-import time
 import functools
-from typing import Any, Callable, Optional, Dict, List, Union, Tuple
-from concurrent.futures import ThreadPoolExecutor, Future, TimeoutError as FutureTimeoutError
-from dataclasses import dataclass
+import logging
+import queue
+import threading
+import time
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from qtpy import QtCore
 
 from pymodaq_utils.utils import ThreadCommand
 
@@ -29,574 +21,576 @@ logger = logging.getLogger(__name__)
 
 class OperationStatus(Enum):
     """Status of threaded operations."""
+
     PENDING = "pending"
-    RUNNING = "running" 
+    RUNNING = "running"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     FAILED = "failed"
-    TIMEOUT = "timeout"
 
 
 @dataclass
 class ThreadedOperation:
-    """Container for threaded operation details."""
+    """Container describing a queued hardware operation."""
+
     operation_id: str
     function: Callable
     args: tuple
     kwargs: dict
     timeout: float
+    name: str
     status: OperationStatus = OperationStatus.PENDING
     result: Any = None
     error: Optional[Exception] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
-    
+    completion_event: threading.Event = field(
+        default_factory=threading.Event, repr=False, compare=False
+    )
+
     @property
     def duration(self) -> Optional[float]:
-        """Get operation duration if completed."""
-        if self.start_time and self.end_time:
-            return self.end_time - self.start_time
-        return None
+        if self.start_time is None or self.end_time is None:
+            return None
+        return self.end_time - self.start_time
 
 
 class ThreadSafeQueue:
-    """Thread-safe queue for hardware commands with priority support."""
-    
+    """Thread-safe queue with priority support for hardware commands."""
+
     def __init__(self, maxsize: int = 0):
-        """
-        Initialize thread-safe queue.
-        
-        Parameters:
-            maxsize: Maximum queue size (0 = unlimited)
-        """
         self._queue = queue.PriorityQueue(maxsize=maxsize)
         self._counter = 0
         self._lock = threading.Lock()
-    
-    def put(self, item: Any, priority: int = 0, timeout: Optional[float] = None) -> bool:
-        """
-        Put item in queue with optional priority.
-        
-        Parameters:
-            item: Item to put in queue
-            priority: Priority (lower number = higher priority)
-            timeout: Optional timeout for putting item
-            
-        Returns:
-            True if item was put successfully, False if timeout
-        """
+
+    def put(
+        self, item: Any, *, priority: int = 0, timeout: Optional[float] = None
+    ) -> bool:
         with self._lock:
             counter = self._counter
             self._counter += 1
-        
+
         try:
             self._queue.put((priority, counter, item), timeout=timeout)
             return True
         except queue.Full:
-            logger.warning("Queue is full, item not added")
+            logger.warning("ThreadSafeQueue is full; dropping item")
             return False
-    
+
     def get(self, timeout: Optional[float] = None) -> Any:
-        """
-        Get item from queue.
-        
-        Parameters:
-            timeout: Optional timeout for getting item
-            
-        Returns:
-            Item from queue
-            
-        Raises:
-            queue.Empty: If timeout occurs
-        """
         priority, counter, item = self._queue.get(timeout=timeout)
         return item
-    
+
     def empty(self) -> bool:
-        """Check if queue is empty."""
         return self._queue.empty()
-    
+
     def qsize(self) -> int:
-        """Get approximate queue size."""
         return self._queue.qsize()
 
 
-class ThreadedHardwareManager:
-    """
-    Manages threaded hardware operations with cancellation and timeout support.
-    
-    This class provides a clean interface for running hardware operations
-    in separate threads while maintaining PyMoDAQ's ThreadCommand pattern
-    for status updates and GUI responsiveness.
-    """
-    
+class _OperationWorker(QtCore.QObject):
+    """Worker executed in a dedicated QThread to run hardware operations."""
+
+    finished = QtCore.Signal(str, object, object)  # operation_id, result, error
+
+    def __init__(self, operation_id: str, function: Callable, args: tuple, kwargs: dict):
+        super().__init__()
+        self._operation_id = operation_id
+        self._function = function
+        self._args = args
+        self._kwargs = kwargs
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        thread = QtCore.QThread.currentThread()
+        try:
+            if thread.isInterruptionRequested():
+                raise InterruptedError("Operation interrupted before execution")
+
+            result = self._function(*self._args, **self._kwargs)
+
+            if thread.isInterruptionRequested():
+                raise InterruptedError("Operation interrupted after execution")
+
+            self.finished.emit(self._operation_id, result, None)
+        except Exception as exc:  # noqa: BLE001 - propagate to manager
+            self.finished.emit(self._operation_id, None, exc)
+
+
+class ThreadedHardwareManager(QtCore.QObject):
+    """Runs hardware operations in Qt-managed threads to avoid event-loop conflicts."""
+
     def __init__(self, max_workers: int = 4, status_callback: Optional[Callable] = None):
-        """
-        Initialize threaded hardware manager.
-        
-        Parameters:
-            max_workers: Maximum number of worker threads
-            status_callback: Callback function for status updates
-        """
-        self.max_workers = max_workers
+        super().__init__()
+        self.max_workers = max(1, max_workers)
         self.status_callback = status_callback
-        
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+
         self._operations: Dict[str, ThreadedOperation] = {}
         self._operation_counter = 0
+        self._threads: Dict[str, QtCore.QThread] = {}
+        self._workers: Dict[str, _OperationWorker] = {}
+        self._pending: List[Tuple[str, Callable, tuple, dict]] = []
         self._lock = threading.Lock()
-        
-        logger.info(f"ThreadedHardwareManager initialized with {max_workers} workers")
-    
-    def _emit_status(self, message: str, level: str = 'log') -> None:
-        """Emit status update via callback."""
-        if self.status_callback:
-            try:
-                self.status_callback(ThreadCommand('Update_Status', [message, level]))
-            except Exception as e:
-                logger.error(f"Error emitting status: {e}")
-    
-    def _generate_operation_id(self) -> str:
-        """Generate unique operation ID."""
+
+        logger.info(
+            "ThreadedHardwareManager initialized with Qt threads (%d max)",
+            self.max_workers,
+        )
+
+    def _emit_status(self, message: str, level: str = "log") -> None:
+        if self.status_callback is None:
+            return
+        try:
+            self.status_callback(ThreadCommand("Update_Status", [message, level]))
+        except Exception as exc:  # noqa: BLE001 - best effort
+            logger.error("Error emitting status callback: %s", exc)
+
+    def _next_operation_id(self) -> str:
         with self._lock:
             self._operation_counter += 1
             return f"op_{self._operation_counter:06d}"
-    
-    def submit_operation(self,
-                        function: Callable,
-                        args: tuple = (),
-                        kwargs: dict = None,
-                        timeout: float = 30.0,
-                        operation_name: Optional[str] = None) -> str:
-        """
-        Submit hardware operation for threaded execution.
-        
-        Parameters:
-            function: Function to execute
-            args: Function arguments
-            kwargs: Function keyword arguments
-            timeout: Operation timeout in seconds
-            operation_name: Optional descriptive name
-            
-        Returns:
-            Operation ID for tracking
-        """
+
+    def submit_operation(
+        self,
+        *,
+        function: Callable,
+        args: tuple = (),
+        kwargs: Optional[dict] = None,
+        timeout: float = 30.0,
+        operation_name: Optional[str] = None,
+    ) -> str:
         if kwargs is None:
             kwargs = {}
-        
-        operation_id = self._generate_operation_id()
+
+        operation_id = self._next_operation_id()
         operation = ThreadedOperation(
             operation_id=operation_id,
             function=function,
             args=args,
             kwargs=kwargs,
-            timeout=timeout
+            timeout=timeout,
+            name=operation_name or function.__name__,
         )
-        
+
         with self._lock:
             self._operations[operation_id] = operation
-        
-        # Submit to thread pool
-        future = self._executor.submit(self._execute_operation, operation)
-        
-        name = operation_name or function.__name__
-        self._emit_status(f"Started threaded operation: {name} ({operation_id})")
-        
-        logger.debug(f"Submitted operation {operation_id}: {name}")
+            should_queue = len(self._threads) >= self.max_workers
+            if should_queue:
+                self._pending.append((operation_id, function, args, kwargs))
+
+        if should_queue:
+            self._emit_status(
+                f"Queued threaded operation: {operation.name} ({operation_id})"
+            )
+            logger.debug("Queued operation %s due to worker limit", operation_id)
+            return operation_id
+
+        self._start_operation_thread(operation_id, function, args, kwargs)
         return operation_id
-    
-    def _execute_operation(self, operation: ThreadedOperation) -> Any:
-        """Execute operation in thread with error handling."""
-        operation.status = OperationStatus.RUNNING
-        operation.start_time = time.time()
-        
-        try:
-            # Execute the operation
-            result = operation.function(*operation.args, **operation.kwargs)
-            
+
+    def _start_operation_thread(
+        self, operation_id: str, function: Callable, args: tuple, kwargs: dict
+    ) -> None:
+        with self._lock:
+            operation = self._operations.get(operation_id)
+            if operation is None:
+                return
+            operation.status = OperationStatus.RUNNING
+            operation.start_time = time.time()
+
+        worker = _OperationWorker(operation_id, function, args, kwargs)
+        thread = QtCore.QThread()
+        thread.setObjectName(f"PyRPL-HW-{operation_id}")
+
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run, QtCore.Qt.QueuedConnection)
+        worker.finished.connect(self._handle_operation_finished, QtCore.Qt.QueuedConnection)
+        worker.finished.connect(worker.deleteLater, QtCore.Qt.QueuedConnection)
+        thread.finished.connect(thread.deleteLater, QtCore.Qt.QueuedConnection)
+
+        with self._lock:
+            self._threads[operation_id] = thread
+            self._workers[operation_id] = worker
+
+        self._emit_status(
+            f"Started threaded operation: {operation.name} ({operation.operation_id})"
+        )
+        logger.debug("Starting QThread for operation %s", operation_id)
+        thread.start()
+
+    @QtCore.Slot(str, object, object)
+    def _handle_operation_finished(
+        self, operation_id: str, result: Any, error: Optional[Exception]
+    ) -> None:
+        with self._lock:
+            operation = self._operations.get(operation_id)
+            thread = self._threads.pop(operation_id, None)
+            self._workers.pop(operation_id, None)
+
+        if thread is not None and thread.isRunning():
+            thread.requestInterruption()
+            thread.quit()
+
+        if operation is None:
+            return
+
+        operation.end_time = time.time()
+
+        if error is None:
             operation.result = result
             operation.status = OperationStatus.COMPLETED
-            operation.end_time = time.time()
-            
-            self._emit_status(f"Operation {operation.operation_id} completed "
-                            f"in {operation.duration:.3f}s")
-            
-            return result
-            
-        except Exception as e:
-            operation.error = e
-            operation.status = OperationStatus.FAILED
-            operation.end_time = time.time()
-            
-            error_msg = f"Operation {operation.operation_id} failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            self._emit_status(error_msg, 'log')
-            
-            raise
-    
-    def get_operation_result(self, operation_id: str, timeout: Optional[float] = None) -> Any:
-        """
-        Get result of completed operation.
-        
-        Parameters:
-            operation_id: Operation ID
-            timeout: Optional timeout for waiting
-            
-        Returns:
-            Operation result
-            
-        Raises:
-            KeyError: If operation ID not found
-            TimeoutError: If timeout occurs
-            Exception: If operation failed
-        """
-        if operation_id not in self._operations:
-            raise KeyError(f"Operation {operation_id} not found")
-        
-        operation = self._operations[operation_id]
-        
-        # Wait for completion if still running
-        start_wait = time.time()
-        while operation.status == OperationStatus.RUNNING:
-            if timeout and (time.time() - start_wait) > timeout:
-                raise TimeoutError(f"Timeout waiting for operation {operation_id}")
-            time.sleep(0.01)
-        
-        if operation.status == OperationStatus.FAILED:
-            raise operation.error
-        elif operation.status == OperationStatus.COMPLETED:
-            return operation.result
+            self._emit_status(
+                f"Operation {operation.name} ({operation.operation_id}) completed in "
+                f"{operation.duration:.3f}s"
+            )
+        elif isinstance(error, InterruptedError):
+            operation.error = None
+            operation.status = OperationStatus.CANCELLED
+            self._emit_status(
+                f"Operation {operation.name} ({operation.operation_id}) cancelled"
+            )
         else:
-            raise RuntimeError(f"Operation {operation_id} in unexpected state: {operation.status}")
-    
-    def wait_for_operation(self, operation_id: str, timeout: Optional[float] = None) -> bool:
-        """
-        Wait for operation to complete.
-        
-        Parameters:
-            operation_id: Operation ID
-            timeout: Optional timeout
-            
-        Returns:
-            True if operation completed successfully, False otherwise
-        """
+            operation.error = error
+            operation.status = OperationStatus.FAILED
+            self._emit_status(
+                f"Operation {operation.name} ({operation.operation_id}) failed: {error}"
+            )
+            logger.error(
+                "Threaded operation %s failed", operation.operation_id, exc_info=error
+            )
+
+        operation.completion_event.set()
+        self._start_next_pending_operation()
+
+    def _start_next_pending_operation(self) -> None:
+        with self._lock:
+            if not self._pending or len(self._threads) >= self.max_workers:
+                return
+            operation_id, function, args, kwargs = self._pending.pop(0)
+        self._start_operation_thread(operation_id, function, args, kwargs)
+
+    def get_operation_status(self, operation_id: str) -> Optional[OperationStatus]:
+        operation = self._operations.get(operation_id)
+        if operation is None:
+            return None
+        return operation.status
+
+    def get_operation_result(
+        self, operation_id: str, timeout: Optional[float] = None
+    ) -> Any:
+        operation = self._operations.get(operation_id)
+        if operation is None:
+            raise KeyError(f"Operation {operation_id} not found")
+
+        if operation.status in {OperationStatus.PENDING, OperationStatus.RUNNING}:
+            wait_timeout = timeout if timeout is not None else operation.timeout
+            success = operation.completion_event.wait(wait_timeout)
+            if not success:
+                raise TimeoutError(f"Timeout waiting for operation {operation_id}")
+
+        if operation.status is OperationStatus.COMPLETED:
+            return operation.result
+        if operation.status is OperationStatus.CANCELLED:
+            raise RuntimeError(f"Operation {operation_id} was cancelled")
+        if operation.status is OperationStatus.FAILED and operation.error is not None:
+            raise operation.error
+
+        raise RuntimeError(
+            f"Operation {operation_id} ended in unexpected state {operation.status}"
+        )
+
+    def wait_for_operation(
+        self, operation_id: str, timeout: Optional[float] = None
+    ) -> bool:
         try:
             self.get_operation_result(operation_id, timeout)
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - callers only need boolean
             return False
-    
+
     def cancel_operation(self, operation_id: str) -> bool:
-        """
-        Cancel pending or running operation.
-        
-        Parameters:
-            operation_id: Operation ID
-            
-        Returns:
-            True if cancellation successful, False otherwise
-        """
-        if operation_id not in self._operations:
-            return False
-        
-        operation = self._operations[operation_id]
-        
-        if operation.status in [OperationStatus.COMPLETED, OperationStatus.FAILED]:
-            return False
-        
-        operation.status = OperationStatus.CANCELLED
-        self._emit_status(f"Operation {operation_id} cancelled")
-        
+        with self._lock:
+            operation = self._operations.get(operation_id)
+            if operation is None:
+                return False
+
+            if operation.status is OperationStatus.PENDING:
+                for index, pending in enumerate(list(self._pending)):
+                    if pending[0] == operation_id:
+                        self._pending.pop(index)
+                        break
+                operation.status = OperationStatus.CANCELLED
+                operation.end_time = time.time()
+                operation.completion_event.set()
+                self._emit_status(
+                    f"Operation {operation.name} ({operation.operation_id}) cancelled"
+                )
+                return True
+
+            thread = self._threads.get(operation_id)
+            if thread is None or not thread.isRunning():
+                return False
+
+            thread.requestInterruption()
+
+        self._emit_status(
+            f"Cancellation requested for {operation.name} ({operation.operation_id})"
+        )
         return True
-    
-    def get_operation_status(self, operation_id: str) -> Optional[OperationStatus]:
-        """Get status of operation."""
-        if operation_id not in self._operations:
-            return None
-        return self._operations[operation_id].status
-    
+
     def list_operations(self) -> List[Dict[str, Any]]:
-        """List all operations with their status."""
-        operations = []
-        for op_id, operation in self._operations.items():
-            operations.append({
-                'id': op_id,
-                'status': operation.status.value,
-                'function': operation.function.__name__,
-                'duration': operation.duration,
-                'error': str(operation.error) if operation.error else None
-            })
-        return operations
-    
+        summary: List[Dict[str, Any]] = []
+        with self._lock:
+            for operation in self._operations.values():
+                summary.append(
+                    {
+                        "id": operation.operation_id,
+                        "name": operation.name,
+                        "status": operation.status.value,
+                        "duration": operation.duration,
+                        "error": str(operation.error) if operation.error else None,
+                    }
+                )
+        return summary
+
     def cleanup_completed_operations(self, max_age_seconds: float = 300) -> int:
-        """
-        Clean up old completed operations.
-        
-        Parameters:
-            max_age_seconds: Maximum age of operations to keep
-            
-        Returns:
-            Number of operations cleaned up
-        """
-        current_time = time.time()
-        to_remove = []
-        
-        for op_id, operation in self._operations.items():
-            if (operation.status in [OperationStatus.COMPLETED, OperationStatus.FAILED, OperationStatus.CANCELLED] and
-                operation.end_time and 
-                (current_time - operation.end_time) > max_age_seconds):
-                to_remove.append(op_id)
-        
-        for op_id in to_remove:
-            del self._operations[op_id]
-        
-        if to_remove:
-            logger.debug(f"Cleaned up {len(to_remove)} old operations")
-        
-        return len(to_remove)
-    
-    def shutdown(self, wait: bool = True, timeout: float = 30.0) -> None:
-        """
-        Shutdown thread pool and clean up resources.
-        
-        Parameters:
-            wait: Whether to wait for completion
-            timeout: Timeout for waiting
-        """
+        now = time.time()
+        removed = 0
+        with self._lock:
+            for operation_id in list(self._operations.keys()):
+                operation = self._operations[operation_id]
+                if (
+                    operation.status in {OperationStatus.COMPLETED, OperationStatus.FAILED, OperationStatus.CANCELLED}
+                    and operation.end_time is not None
+                    and (now - operation.end_time) > max_age_seconds
+                ):
+                    removed += 1
+                    self._operations.pop(operation_id)
+        if removed:
+            logger.debug("Cleaned up %d completed operations", removed)
+        return removed
+
+    def shutdown(self, timeout: float = 30.0) -> None:
         logger.info("Shutting down ThreadedHardwareManager")
-        
-        # Cancel all pending operations
-        for op_id, operation in self._operations.items():
-            if operation.status in [OperationStatus.PENDING, OperationStatus.RUNNING]:
-                self.cancel_operation(op_id)
-        
-        # Shutdown executor
-        self._executor.shutdown(wait=wait, timeout=timeout)
-        
-        self._emit_status("ThreadedHardwareManager shut down")
+
+        with self._lock:
+            threads = list(self._threads.items())
+
+        for operation_id, thread in threads:
+            if thread is None:
+                continue
+            thread.requestInterruption()
+            thread.quit()
+            if not thread.wait(int(timeout * 1000)):
+                logger.warning(
+                    "Thread %s did not terminate cleanly during shutdown", operation_id
+                )
+
+        with self._lock:
+            for operation in self._operations.values():
+                if operation.status in {OperationStatus.PENDING, OperationStatus.RUNNING}:
+                    operation.status = OperationStatus.CANCELLED
+                    operation.end_time = time.time()
+                    operation.completion_event.set()
+
+        self._threads.clear()
+        self._workers.clear()
+        self._pending.clear()
+        self._emit_status("Threaded hardware manager shut down")
+
+
+class _AcquisitionWorker(QtCore.QObject):
+    """Worker that polls hardware from a Qt-managed thread."""
+
+    data_ready = QtCore.Signal(object)
+    error = QtCore.Signal(object)
+    status = QtCore.Signal(str, str)
+
+    def __init__(self, acquisition_function: Callable, interval: float):
+        super().__init__()
+        self._acquisition_function = acquisition_function
+        self._timer = QtCore.QTimer(self)
+        self._timer.setTimerType(QtCore.Qt.PreciseTimer)
+        self._timer.timeout.connect(self._poll_once, QtCore.Qt.QueuedConnection)
+        self.set_interval(interval)
+
+    @QtCore.Slot(float)
+    def set_interval(self, interval: float) -> None:
+        self._interval_ms = max(1, int(max(interval, 0.001) * 1000))
+        if self._timer.isActive():
+            self._timer.start(self._interval_ms)
+
+    @QtCore.Slot()
+    def start(self) -> None:
+        if self._timer.isActive():
+            return
+        self.status.emit("Started continuous data acquisition", "log")
+        self._timer.start(self._interval_ms)
+
+    @QtCore.Slot()
+    def stop(self) -> None:
+        if not self._timer.isActive():
+            return
+        self._timer.stop()
+        self.status.emit("Stopped continuous data acquisition", "log")
+
+    @QtCore.Slot()
+    def _poll_once(self) -> None:
+        thread = QtCore.QThread.currentThread()
+        if thread.isInterruptionRequested():
+            self.stop()
+            return
+        try:
+            data = self._acquisition_function()
+            if data is not None:
+                self.data_ready.emit(data)
+        except Exception as exc:  # noqa: BLE001 - forward to callbacks
+            self.error.emit(exc)
 
 
 class AsyncDataAcquisition:
-    """
-    Asynchronous data acquisition with cancellation support.
-    
-    This class provides a high-level interface for running continuous
-    data acquisition in the background while maintaining responsiveness.
-    """
-    
-    def __init__(self, 
-                 acquisition_function: Callable,
-                 data_callback: Callable,
-                 status_callback: Optional[Callable] = None,
-                 error_callback: Optional[Callable] = None):
-        """
-        Initialize async data acquisition.
-        
-        Parameters:
-            acquisition_function: Function that acquires data
-            data_callback: Called with acquired data
-            status_callback: Called with status updates
-            error_callback: Called when errors occur
-        """
+    """Continuous acquisition helper built on Qt threads and timers."""
+
+    def __init__(
+        self,
+        *,
+        acquisition_function: Callable,
+        data_callback: Callable,
+        status_callback: Optional[Callable] = None,
+        error_callback: Optional[Callable] = None,
+    ) -> None:
         self.acquisition_function = acquisition_function
         self.data_callback = data_callback
         self.status_callback = status_callback
         self.error_callback = error_callback
-        
-        self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
+
+        self._thread: Optional[QtCore.QThread] = None
+        self._worker: Optional[_AcquisitionWorker] = None
         self._running = False
-        
+
     def start(self, interval: float = 0.1) -> bool:
-        """
-        Start continuous data acquisition.
-        
-        Parameters:
-            interval: Acquisition interval in seconds
-            
-        Returns:
-            True if started successfully, False otherwise
-        """
         if self._running:
-            logger.warning("Data acquisition already running")
+            logger.warning("AsyncDataAcquisition already running")
             return False
-        
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._acquisition_loop,
-            args=(interval,),
-            daemon=True
-        )
-        
+
+        self._thread = QtCore.QThread()
+        self._thread.setObjectName("PyRPL-Acquisition")
+        self._worker = _AcquisitionWorker(self.acquisition_function, interval)
+        self._worker.moveToThread(self._thread)
+
+        self._worker.data_ready.connect(self._handle_data, QtCore.Qt.QueuedConnection)
+        self._worker.error.connect(self._handle_error, QtCore.Qt.QueuedConnection)
+        self._worker.status.connect(self._handle_status, QtCore.Qt.QueuedConnection)
+
+        self._thread.started.connect(self._worker.start, QtCore.Qt.QueuedConnection)
+        self._thread.finished.connect(self._thread.deleteLater, QtCore.Qt.QueuedConnection)
+        self._thread.finished.connect(self._cleanup_worker, QtCore.Qt.QueuedConnection)
+
         self._thread.start()
         self._running = True
-        
-        if self.status_callback:
-            self.status_callback(ThreadCommand('Update_Status', 
-                ['Started continuous data acquisition', 'log']))
-        
-        logger.info(f"Started async data acquisition with {interval}s interval")
+        logger.info("Started async data acquisition using Qt QThread")
         return True
-    
+
     def stop(self, timeout: float = 5.0) -> bool:
-        """
-        Stop data acquisition.
-        
-        Parameters:
-            timeout: Timeout for stopping
-            
-        Returns:
-            True if stopped successfully, False otherwise
-        """
         if not self._running:
             return True
-        
-        logger.info("Stopping async data acquisition")
-        self._stop_event.set()
-        
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
-            
-            if self._thread.is_alive():
-                logger.warning("Data acquisition thread did not stop within timeout")
+
+        if self._worker is not None:
+            QtCore.QMetaObject.invokeMethod(
+                self._worker, "stop", QtCore.Qt.QueuedConnection
+            )
+
+        if self._thread is not None:
+            self._thread.requestInterruption()
+            self._thread.quit()
+            finished = self._thread.wait(int(timeout * 1000))
+            if not finished:
+                logger.warning("Acquisition thread did not stop within timeout")
                 return False
-        
+
+        self._cleanup_worker()
         self._running = False
-        
-        if self.status_callback:
-            self.status_callback(ThreadCommand('Update_Status', 
-                ['Stopped continuous data acquisition', 'log']))
-        
         return True
-    
-    def _acquisition_loop(self, interval: float) -> None:
-        """Main acquisition loop running in thread."""
-        logger.debug("Data acquisition loop started")
-        
-        while not self._stop_event.is_set():
+
+    def _cleanup_worker(self) -> None:
+        if self._worker is not None:
+            self._worker.deleteLater()
+            self._worker = None
+        self._thread = None
+
+    def _handle_data(self, data: Any) -> None:
+        try:
+            self.data_callback(data)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error in data callback: %s", exc, exc_info=True)
+
+    def _handle_error(self, error: Exception) -> None:
+        logger.error("Error during async acquisition: %s", error, exc_info=True)
+        if self.error_callback is not None:
             try:
-                # Acquire data
-                data = self.acquisition_function()
-                
-                if data is not None:
-                    # Send data to callback
-                    self.data_callback(data)
-                
-                # Wait for next acquisition (with early exit on stop)
-                self._stop_event.wait(timeout=interval)
-                
-            except Exception as e:
-                logger.error(f"Error in data acquisition loop: {e}", exc_info=True)
-                
-                if self.error_callback:
-                    try:
-                        self.error_callback(e)
-                    except Exception as cb_error:
-                        logger.error(f"Error in error callback: {cb_error}")
-                
-                # Continue loop unless critical error
-                self._stop_event.wait(timeout=interval)
-        
-        logger.debug("Data acquisition loop ended")
-    
+                self.error_callback(error)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error in acquisition error callback: %s", exc)
+
+    def _handle_status(self, message: str, level: str) -> None:
+        if self.status_callback is None:
+            return
+        try:
+            self.status_callback(ThreadCommand("Update_Status", [message, level]))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error in acquisition status callback: %s", exc)
+
     @property
     def is_running(self) -> bool:
-        """Check if acquisition is running."""
-        return self._running and self._thread and self._thread.is_alive()
+        return self._running and self._thread is not None and self._thread.isRunning()
 
 
-def threaded_hardware_operation(timeout: float = 30.0, 
-                               manager: Optional[ThreadedHardwareManager] = None):
-    """
-    Decorator for making hardware operations threaded.
-    
-    Parameters:
-        timeout: Operation timeout
-        manager: Optional hardware manager instance
-        
-    Returns:
-        Decorated function
-    """
+def threaded_hardware_operation(
+    *, timeout: float = 30.0, manager: Optional[ThreadedHardwareManager] = None
+) -> Callable:
+    """Decorator that executes the wrapped function via :class:`ThreadedHardwareManager`."""
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             nonlocal manager
-            
-            # Use default manager if none provided
             if manager is None:
                 manager = ThreadedHardwareManager(max_workers=2)
-            
-            # Submit operation
             operation_id = manager.submit_operation(
                 function=func,
                 args=args,
                 kwargs=kwargs,
                 timeout=timeout,
-                operation_name=func.__name__
+                operation_name=func.__name__,
             )
-            
-            # Wait for result
             return manager.get_operation_result(operation_id, timeout=timeout)
-        
+
         return wrapper
+
     return decorator
 
 
-if __name__ == '__main__':
-    # Test threading utilities
-    def test_function(duration: float = 1.0, should_fail: bool = False):
-        """Test function for threading."""
+if __name__ == "__main__":
+    import sys
+
+    app = QtCore.QCoreApplication(sys.argv)
+
+    def test_function(duration: float = 0.2, should_fail: bool = False) -> str:
         time.sleep(duration)
         if should_fail:
             raise ValueError("Test error")
         return f"Completed after {duration}s"
-    
-    def status_callback(command: ThreadCommand):
-        """Test status callback."""
-        print(f"Status: {command.path} - {command.param}")
-    
-    # Test ThreadedHardwareManager
-    print("Testing ThreadedHardwareManager...")
-    manager = ThreadedHardwareManager(max_workers=2, status_callback=status_callback)
-    
-    # Submit some operations
-    op1 = manager.submit_operation(test_function, args=(0.5,), operation_name="Quick test")
-    op2 = manager.submit_operation(test_function, args=(1.0,), operation_name="Slow test")
-    
-    # Wait for results
-    try:
-        result1 = manager.get_operation_result(op1, timeout=2.0)
-        result2 = manager.get_operation_result(op2, timeout=2.0)
-        print(f"Results: {result1}, {result2}")
-    except Exception as e:
-        print(f"Error: {e}")
-    
-    # List operations
-    print("Operations:", manager.list_operations())
-    
-    # Test AsyncDataAcquisition
-    print("\nTesting AsyncDataAcquisition...")
-    
-    def acquire_data():
-        """Mock data acquisition."""
-        return f"Data at {time.time()}"
-    
-    def data_callback(data):
-        """Mock data callback."""
-        print(f"Received: {data}")
-    
-    acquisition = AsyncDataAcquisition(
-        acquisition_function=acquire_data,
-        data_callback=data_callback,
-        status_callback=status_callback
-    )
-    
-    # Start acquisition
-    acquisition.start(interval=0.5)
-    time.sleep(2.0)
-    acquisition.stop()
-    
-    # Cleanup
+
+    manager = ThreadedHardwareManager(max_workers=2)
+    op = manager.submit_operation(function=test_function, args=(0.2,), operation_name="test")
+    print("Operation result:", manager.get_operation_result(op, timeout=1.0))
     manager.shutdown()
-    
-    print("Threading utilities test completed!")
+
+    acquisition = AsyncDataAcquisition(
+        acquisition_function=lambda: f"tick-{time.time()}",
+        data_callback=lambda data: print("data", data),
+    )
+    acquisition.start(0.1)
+    QtCore.QTimer.singleShot(500, lambda: acquisition.stop())
+    QtCore.QTimer.singleShot(700, app.quit)
+    sys.exit(app.exec())

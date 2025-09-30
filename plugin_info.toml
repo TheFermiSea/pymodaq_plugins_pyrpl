@@ -38,7 +38,7 @@ daq_1Dviewer_PyRPL_Scope = "pymodaq_plugins_pyrpl.daq_viewer_plugins.plugins_1D.
 ## Models (PID Extensions)
 ## Custom PID models for advanced control applications
 [entry-points.'pymodaq_plugins_models']
-PIDModelPyrpl = "pymodaq_plugins_pyrpl.models.PIDModelPyrpl"
+PIDModelPyRPL = "pymodaq_plugins_pyrpl.models.PIDModelPyRPL"
 
 ## Plugin-specific metadata for PyMoDAQ integration
 [plugin-info]
@@ -101,7 +101,7 @@ detectors = [
 
 # PID Models
 models = [
-    {name = "PIDModelPyrpl", description = "PyRPL-based PID controller model"}
+    {name = "PIDModelPyRPL", description = "PyRPL-based PID controller model"}
 ]
 
 ## Configuration and setup information

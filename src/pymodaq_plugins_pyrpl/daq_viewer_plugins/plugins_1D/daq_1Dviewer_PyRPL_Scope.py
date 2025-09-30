@@ -83,6 +83,7 @@ class MockScopeConnection:
         self.is_connected = True
         self.state = ConnectionState.CONNECTED
         self._scope_config: Optional[ScopeConfiguration] = None
+        self.mock_waveform: str = 'damped_sine'
 
     def configure_scope(self, config: ScopeConfiguration) -> bool:
         """Mock scope configuration."""
@@ -106,13 +107,22 @@ class MockScopeConnection:
         # Generate time axis
         time_axis = np.linspace(0, duration, data_length)
 
-        # Generate mock signal: damped sine wave with noise
+        # Generate mock signal with selectable waveform and noise
         frequency = 1e3  # 1 kHz signal
         amplitude = 0.5
         decay_time = duration / 3
         noise_level = 0.02
 
-        signal = amplitude * np.sin(2 * np.pi * frequency * time_axis) * np.exp(-time_axis / decay_time)
+        waveform = getattr(self, 'mock_waveform', 'damped_sine')
+
+        if waveform == 'square':
+            base = np.sin(2 * np.pi * frequency * time_axis)
+            signal = amplitude * np.where(base < 0, -1.0, 1.0)
+        elif waveform == 'noise':
+            signal = np.random.normal(0, amplitude, data_length)
+        else:
+            signal = amplitude * np.sin(2 * np.pi * frequency * time_axis) * np.exp(-time_axis / decay_time)
+
         noise = np.random.normal(0, noise_level, data_length)
         voltage_data = signal + noise
 
@@ -295,6 +305,15 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                     'tip': 'Enable rolling mode for continuous acquisition'
                 },
                 {
+                    'title': 'Mock Waveform:',
+                    'name': 'mock_waveform',
+                    'type': 'list',
+                    'limits': ['damped_sine', 'square', 'noise'],
+                    'value': 'damped_sine',
+                    'tip': 'Waveform for mock mode',
+                    'show_if': "{'connection.mock_mode': True}"
+                },
+                {
                     'title': 'Timeout (s):',
                     'name': 'timeout',
                     'type': 'float',
@@ -420,6 +439,11 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                 if self.controller.is_connected and self.scope_config is not None:
                     self._update_scope_configuration()
 
+        elif param_name == 'mock_waveform':
+            if (self.controller is not None and
+                isinstance(self.controller, MockScopeConnection)):
+                self.controller.mock_waveform = param.value()
+
         elif param_name == 'open_native_scope':
             # Launch PyRPL native scope widget
             self._launch_native_scope_widget()
@@ -493,6 +517,7 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                 if mock_mode:
                     # Use mock connection for development
                     self.controller = MockScopeConnection(hostname)
+                    self.controller.mock_waveform = self.settings['acquisition', 'mock_waveform']
                     info = f"Mock PyRPL Scope connection established for {hostname}"
                     logger.info(info)
 
