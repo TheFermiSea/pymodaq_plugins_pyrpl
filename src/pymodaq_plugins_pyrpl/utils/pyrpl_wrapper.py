@@ -57,15 +57,23 @@ try:
         pass  # pyqtgraph not available
 
     # Qt timer compatibility fix - patch before importing pyrpl
+    # NOTE: With gui=False in Pyrpl(), this patch should not be needed
+    # Kept as a safeguard for edge cases, but made non-recursive
     try:
         from qtpy.QtCore import QTimer
-        original_setInterval = QTimer.setInterval
+        if not hasattr(QTimer, '_pymodaq_pyrpl_patched'):
+            original_setInterval = QTimer.setInterval
 
-        def setInterval_patched(self, msec):
-            """Patched setInterval to handle float inputs properly."""
-            return original_setInterval(self, int(msec))
+            def setInterval_patched(self, msec):
+                """Patched setInterval to handle float inputs properly."""
+                try:
+                    return original_setInterval(self, int(msec))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"QTimer.setInterval called with invalid value {msec}: {e}")
+                    return original_setInterval(self, 1000)  # fallback to 1 second
 
-        QTimer.setInterval = setInterval_patched
+            QTimer.setInterval = setInterval_patched
+            QTimer._pymodaq_pyrpl_patched = True  # Mark as patched to prevent re-patching
     except ImportError:
         pass  # Qt not available, skip timer patch
 
@@ -495,11 +503,14 @@ class PyRPLConnection:
                         raise ImportError("PyRPL not available - lazy import failed")
                     
                     # Create PyRPL connection
+                    # CRITICAL: gui=False prevents Qt widget creation in PyMoDAQ worker threads
+                    # This avoids thread recursion errors when PyRPL's Qt objects run in non-main threads
                     self._pyrpl = pyrpl.Pyrpl(
                         config=self.config_name,
                         hostname=self.hostname,
                         port=self.port,
-                        timeout=self.connection_timeout
+                        timeout=self.connection_timeout,
+                        gui=False  # Disable GUI to prevent Qt threading conflicts
                     )
 
                     self._redpitaya = self._pyrpl.rp
