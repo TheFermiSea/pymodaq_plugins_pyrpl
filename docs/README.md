@@ -166,7 +166,7 @@ See [Developer Guide](DEVELOPER_GUIDE.md) for:
 
 ### Hardware Validation
 
-✅ **Last Validated:** January 30, 2025
+**Last Validated:** January 30, 2025
 
 - **Device:** Red Pitaya STEMlab at 100.107.106.75
 - **PyRPL:** v0.9.6.0 (with patches)
@@ -202,12 +202,12 @@ MIT License - See `../LICENSE` for details
 
 ### Latest (Jan 2025)
 
-- ✅ Hardware validation with real Red Pitaya
-- ✅ PyRPL 0.9.6.0 bug fixes identified and patched
-- ✅ All 8 hardware modules verified functional
-- ✅ Comprehensive testing documentation
-- ✅ Python 3.11/3.12 compatibility confirmed
-- ✅ Qt6 compatibility verified
+- Hardware validation with real Red Pitaya
+- PyRPL 0.9.6.0 bug fixes identified and patched
+- All 8 hardware modules verified functional
+- Comprehensive testing documentation
+- Python 3.11/3.12 compatibility confirmed
+- Qt6 compatibility verified
 
 ### Previous
 

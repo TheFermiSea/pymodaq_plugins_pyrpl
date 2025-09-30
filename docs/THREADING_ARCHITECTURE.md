@@ -133,7 +133,7 @@ This plugin prioritizes PyMoDAQ's threading model:
 
 ## What NOT to Do
 
-### ❌ Using qasync Launcher
+### Do NOT Use: qasync Launcher
 
 The repository contains `pymodaq_qasync_launcher.py` from earlier attempts to solve this problem. **Do not use it** for production:
 
@@ -142,7 +142,7 @@ The repository contains `pymodaq_qasync_launcher.py` from earlier attempts to so
 - Not needed with `gui=False` solution
 - May be removed in future versions
 
-### ❌ Using IPC Version
+### Do NOT Use: IPC Version
 
 The `DAQ_1DViewer_PyRPL_Scope_IPC` plugin runs PyRPL in a separate process. **Do not use it** for production:
 
@@ -152,7 +152,7 @@ The `DAQ_1DViewer_PyRPL_Scope_IPC` plugin runs PyRPL in a separate process. **Do
 - Not needed with `gui=False` solution
 - May be removed or marked experimental
 
-### ❌ Removing QTimer Patches
+### Do NOT Remove: QTimer Patches
 
 The QTimer compatibility patches should remain:
 
@@ -182,13 +182,13 @@ The QTimer compatibility patches should remain:
 
 ### Expected Behavior
 
-✅ **Should work**:
+**Should work**:
 - Launching any plugin from PyMoDAQ dashboard
 - Running multiple plugins simultaneously
 - Continuous data acquisition
 - Parameter changes during acquisition
 
-❌ **Should NOT happen**:
+**Should NOT happen**:
 - Thread recursion errors
 - Stack overflow crashes
 - Qt event loop warnings
