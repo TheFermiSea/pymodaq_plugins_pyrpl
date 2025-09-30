@@ -23,6 +23,7 @@ Comprehensive documentation for the PyRPL/PyMoDAQ integration plugin.
 ### Advanced Topics
 
 - **[Control Theory Foundations](CONTROL_THEORY_FOUNDATIONS.md)** - PID control theory and implementation details
+- **[Threading Architecture](THREADING_ARCHITECTURE.md)** - How PyRPL integrates with PyMoDAQ's multi-threaded framework
 
 ## Quick Links
 
