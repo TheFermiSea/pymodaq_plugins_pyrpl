@@ -108,8 +108,7 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                         minimal_config = {
                             'pyrpl': {
                                 'name': config_name,
-                                # DON'T set modules=[] - this disables ALL modules including ASG!
-                                # Instead, let PyRPL load its default modules
+                                'modules': [],  # Don't load problematic modules (NetworkAnalyzer, PID has bugs)
                                 'loglevel': 'info',
                                 'background_color': ''
                             },
