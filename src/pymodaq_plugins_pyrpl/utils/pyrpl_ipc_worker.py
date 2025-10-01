@@ -326,14 +326,11 @@ def _handle_pyrpl_command(pyrpl: Any, command: str, params: Dict[str, Any]) -> D
                     time.sleep(0.001)
             
             # Read the data directly from scope properties
+            # We always configure scope.input1, so we always read from ch1_data
             ch1_data = pyrpl.rp.scope._data_ch1
-            ch2_data = pyrpl.rp.scope._data_ch2
+            voltage_data = ch1_data
             
-            # Use the correct channel based on input_channel setting
-            if input_channel == 'in1':
-                voltage_data = ch1_data
-            else:
-                voltage_data = ch2_data
+            logger.info(f"Scope configured: input1={pyrpl.rp.scope.input1}, reading ch1_data")
             
             # Log signal statistics for debugging
             logger.info(f"Acquired {len(voltage_data)} points, "
@@ -409,14 +406,26 @@ def _handle_pyrpl_command(pyrpl: Any, command: str, params: Dict[str, Any]) -> D
         # Configure ASG
         if 'waveform' in params:
             asg.waveform = params['waveform']
+            logger.info(f"ASG {asg_channel} waveform set to: {asg.waveform}")
         if 'frequency' in params:
             asg.frequency = params['frequency']
+            logger.info(f"ASG {asg_channel} frequency set to: {asg.frequency} Hz")
         if 'amplitude' in params:
             asg.amplitude = params['amplitude']
+            logger.info(f"ASG {asg_channel} amplitude set to: {asg.amplitude}V")
         if 'offset' in params:
             asg.offset = params['offset']
+            logger.info(f"ASG {asg_channel} offset set to: {asg.offset}V")
         if 'output_direct' in params:
             asg.output_direct = params['output_direct']
+            logger.info(f"ASG {asg_channel} output_direct set to: {asg.output_direct}")
+        if 'trigger_source' in params:
+            asg.trigger_source = params['trigger_source']
+            logger.info(f"ASG {asg_channel} trigger_source set to: {asg.trigger_source}")
+        
+        logger.info(f"ASG {asg_channel} final state: waveform={asg.waveform}, freq={asg.frequency}Hz, "
+                   f"amp={asg.amplitude}V, offset={asg.offset}V, output={asg.output_direct}, "
+                   f"trigger={asg.trigger_source}")
         
         return {'status': 'ok', 'data': None}
     
