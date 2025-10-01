@@ -118,9 +118,9 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                                 'user': 'root',
                                 'password': 'root',
                                 'gui': False,
-                                'autostart': True,
-                                'reloadfpga': False,  # Skip FPGA reload - use existing bitstream
-                                'reloadserver': False  # Skip server reload
+                                'autostart': True
+                                # Let PyRPL load its FPGA bitstream (required for ASG, PID, etc.)
+                                # reloadfpga defaults to True, which is what we want
                             }
                         }
                         with open(config_path, 'w') as f:
