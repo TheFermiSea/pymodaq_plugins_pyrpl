@@ -44,8 +44,8 @@ from pymodaq.utils.data import DataFromPlugins
 from pymodaq.utils.daq_utils import ThreadCommand
 from pymodaq.utils.parameter import Parameter
 
-# Import the worker function
-from pymodaq_plugins_pyrpl.utils.pyrpl_ipc_worker import pyrpl_worker_main
+# Import the shared worker manager (singleton pattern)
+from pymodaq_plugins_pyrpl.utils.shared_pyrpl_manager import get_shared_worker_manager
 
 
 class DAQ_0DViewer_PyRPL_IQ_IPC(DAQ_Viewer_base):
@@ -108,10 +108,10 @@ class DAQ_0DViewer_PyRPL_IQ_IPC(DAQ_Viewer_base):
         """Initialize the plugin."""
         super().__init__(parent, params_state)
         
-        # IPC using multiprocessing.Queue
+        # Shared worker manager (singleton - one worker shared by all plugins)
+        self.manager = None
         self.command_queue: Optional[Queue] = None
         self.response_queue: Optional[Queue] = None
-        self.worker_process: Optional[Process] = None
         
         # Plugin state
         self.is_connected = False

@@ -38,8 +38,8 @@ from pymodaq.utils.data import DataFromPlugins, Axis
 from pymodaq.utils.daq_utils import ThreadCommand
 from pymodaq.utils.parameter import Parameter
 
-# Import the worker function
-from pymodaq_plugins_pyrpl.utils.pyrpl_ipc_worker import pyrpl_worker_main
+# Import the shared worker manager (singleton pattern)
+from pymodaq_plugins_pyrpl.utils.shared_pyrpl_manager import get_shared_worker_manager
 
 
 class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
@@ -88,10 +88,10 @@ class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
         """Initialize the plugin."""
         super().__init__(parent, params_state)
 
-        # IPC using multiprocessing.Queue
+        # Shared worker manager (singleton - one worker shared by all plugins)
+        self.manager = None
         self.command_queue: Optional[Queue] = None
         self.response_queue: Optional[Queue] = None
-        self.worker_process: Optional[Process] = None
 
         # Plugin state
         self.is_connected = False
@@ -102,7 +102,12 @@ class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
 
     def _send_command(self, command: str, params: dict = None, timeout: float = 5.0) -> dict:
         """
-        Send a command to the PyRPL worker and wait for response.
+        Send a command to the PyRPL worker via SharedPyRPLManager.
+
+        This method uses the manager's send_command which handles:
+        - UUID generation for command multiplexing
+        - Thread-safe response routing
+        - Automatic cleanup of pending responses
 
         Args:
             command: Command name
@@ -113,47 +118,47 @@ class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
             Response dictionary from worker
 
         Raises:
-            RuntimeError: If worker returns error
+            RuntimeError: If worker returns error or not initialized
             TimeoutError: If no response within timeout
         """
-        if not self.command_queue or not self.response_queue:
-            raise RuntimeError("Worker not initialized")
-
-        # Send command
-        self.command_queue.put({
-            'command': command,
-            'params': params or {}
-        })
+        if not self.manager:
+            raise RuntimeError("Shared worker manager not initialized")
 
         if self.settings['dev', 'debug_logging']:
             self.emit_status(ThreadCommand('Update_Status',
-                [f"Sent command: {command}", 'log']))
+                [f"Sending command: {command}", 'log']))
 
-        # Wait for response
-        try:
-            response = self.response_queue.get(timeout=timeout)
+        # Use manager's send_command for proper UUID-based multiplexing
+        response = self.manager.send_command(command, params or {}, timeout=timeout)
 
-            if response['status'] == 'error':
-                error_msg = f"PyRPL worker error: {response['data']}"
-                self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
-                raise RuntimeError(error_msg)
+        if response['status'] == 'error':
+            error_msg = f"PyRPL worker error: {response['data']}"
+            self.emit_status(ThreadCommand('Update_Status', [error_msg, 'log']))
+            raise RuntimeError(error_msg)
 
-            return response
-
-        except Empty:
-            raise TimeoutError(f"No response from worker after {timeout}s")
+        return response
 
     def _start_worker(self) -> bool:
         """
-        Start the PyRPL worker process.
+        Start (or connect to) the shared PyRPL worker process.
+
+        CRITICAL: This method uses SharedPyRPLManager singleton to ensure
+        only ONE PyRPL worker process exists for ALL plugins. This prevents:
+        - Multiple concurrent SSH connections to Red Pitaya
+        - Monitor server conflicts
+        - FPGA bitstream reload issues
+        - "NoneType object is not subscriptable" errors
 
         Returns:
-            True if worker started successfully
+            True if worker is ready and responding
         """
         try:
-            # Create fresh queues
-            self.command_queue = Queue()
-            self.response_queue = Queue()
+            self.emit_status(ThreadCommand('Update_Status',
+                ["Connecting to shared PyRPL worker...", 'log']))
+
+            # Get the singleton manager instance
+            # This ensures ALL plugins share the same worker process
+            self.manager = get_shared_worker_manager()
 
             # Build configuration
             config = {
@@ -162,41 +167,36 @@ class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
                 'mock_mode': self.settings['dev', 'mock_mode']
             }
 
-            self.emit_status(ThreadCommand('Update_Status',
-                ["Starting PyRPL worker process...", 'log']))
+            # Start worker (or get existing one if already running)
+            # This will start a NEW worker ONLY if none exists
+            # Otherwise it returns the queues to the EXISTING worker
+            self.command_queue, self.response_queue = self.manager.start_worker(config)
 
-            # Start worker process
-            self.worker_process = Process(
-                target=pyrpl_worker_main,
-                args=(self.command_queue, self.response_queue, config),
-                daemon=True  # Ensure it terminates with main process
-            )
-            self.worker_process.start()
-
-            # Wait for initialization confirmation
+            # Test connection with ping command
             timeout = self.settings['connection', 'connection_timeout']
             
-            try:
-                response = self.response_queue.get(timeout=timeout)
-                
-                if response['status'] == 'ok':
-                    self.is_connected = True
-                    self.emit_status(ThreadCommand('Update_Status',
-                        [f"PyRPL worker initialized: {response['data']}", 'log']))
-                    return True
-                else:
-                    self.emit_status(ThreadCommand('Update_Status',
-                        [f"Worker initialization failed: {response['data']}", 'log']))
-                    return False
-
-            except Empty:
+            self.emit_status(ThreadCommand('Update_Status',
+                ["Testing worker connection with ping...", 'log']))
+            
+            response = self.manager.send_command('ping', {}, timeout=timeout)
+            
+            if response['status'] == 'ok' and response['data'] == 'pong':
+                self.is_connected = True
                 self.emit_status(ThreadCommand('Update_Status',
-                    [f"Worker did not respond within {timeout}s", 'log']))
+                    ["Shared PyRPL worker connected successfully", 'log']))
+                return True
+            else:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Worker ping test failed: {response}", 'log']))
                 return False
 
+        except TimeoutError as e:
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Worker connection timeout: {e}", 'log']))
+            return False
         except Exception as e:
             self.emit_status(ThreadCommand('Update_Status',
-                [f"Failed to start worker: {e}", 'log']))
+                [f"Failed to connect to worker: {e}", 'log']))
             return False
 
     def commit_settings(self, param: Parameter):
@@ -271,46 +271,27 @@ class DAQ_1DViewer_PyRPL_Scope_IPC(DAQ_Viewer_base):
         return self.status
 
     def close(self):
-        """Close connections and clean up resources."""
+        """
+        Close plugin connection and clean up resources.
+        
+        IMPORTANT: This plugin does NOT shutdown the shared PyRPL worker
+        because other plugins may still be using it. The SharedPyRPLManager
+        handles worker lifecycle via atexit handlers.
+        
+        This method only cleans up this plugin's local references.
+        """
         self.emit_status(ThreadCommand('Update_Status',
-            ["Closing PyRPL connection...", 'log']))
+            ["Closing PyRPL plugin connection...", 'log']))
 
-        # Send shutdown command
-        if self.command_queue and self.is_connected:
-            try:
-                self.command_queue.put({'command': 'shutdown', 'params': {}})
-                time.sleep(0.5)  # Give worker time to cleanup
-            except Exception:
-                pass
-
-        # Terminate worker process
-        if self.worker_process and self.worker_process.is_alive():
-            try:
-                # Try graceful termination first
-                self.worker_process.join(timeout=3.0)
-                
-                # Force terminate if still alive
-                if self.worker_process.is_alive():
-                    self.worker_process.terminate()
-                    self.worker_process.join(timeout=2.0)
-                
-                # Last resort: kill
-                if self.worker_process.is_alive():
-                    self.worker_process.kill()
-                    self.worker_process.join()
-
-            except Exception as e:
-                self.emit_status(ThreadCommand('Update_Status',
-                    [f"Warning: Error terminating worker: {e}", 'log']))
-
-        # Cleanup resources
-        self.worker_process = None
+        # Clean up local references
+        # DO NOT shutdown the shared worker - other plugins may need it
         self.command_queue = None
         self.response_queue = None
+        self.manager = None
         self.is_connected = False
 
         self.emit_status(ThreadCommand('Update_Status',
-            ["PyRPL connection closed", 'log']))
+            ["PyRPL plugin connection closed", 'log']))
 
     def grab_data(self, Naverage=1, **kwargs):
         """

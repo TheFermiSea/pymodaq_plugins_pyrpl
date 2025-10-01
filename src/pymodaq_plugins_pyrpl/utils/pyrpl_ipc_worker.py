@@ -101,14 +101,27 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                     import yaml
                     config_path = os.path.expanduser(f'~/pyrpl_user_dir/config/{config_name}.yml')
                     
-                    # If config doesn't exist or is corrupted, create minimal one
+                    # ============================================================
+                    # CRITICAL: FPGA Bitstream Loading Configuration
+                    # ============================================================
+                    # PyRPL REQUIRES its custom FPGA bitstream to be loaded for
+                    # hardware modules (ASG, PID, Scope, IQ) to function.
+                    # 
+                    # DO NOT set reloadfpga=False unless you are 100% certain
+                    # the PyRPL bitstream is already loaded.
+                    # 
+                    # The default (reloadfpga=True) is CORRECT and NECESSARY.
+                    # ============================================================
+                    
                     if not os.path.exists(config_path) or os.path.getsize(config_path) < 100:
                         logger.info(f"Creating minimal config at {config_path}")
+                        logger.info("FPGA bitstream will be loaded (this takes ~5-7 seconds on first connection)")
                         os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                        
                         minimal_config = {
                             'pyrpl': {
                                 'name': config_name,
-                                'modules': [],  # Don't load problematic modules (NetworkAnalyzer, PID has bugs)
+                                'modules': [],  # Don't load problematic modules (NetworkAnalyzer has bugs)
                                 'loglevel': 'info',
                                 'background_color': ''
                             },
@@ -118,13 +131,43 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                                 'user': 'root',
                                 'password': 'root',
                                 'gui': False,
-                                'autostart': True
-                                # Let PyRPL load its FPGA bitstream (required for ASG, PID, etc.)
-                                # reloadfpga defaults to True, which is what we want
+                                'autostart': True,
+                                # reloadfpga: Let PyRPL decide (defaults to True, which is correct)
+                                # DO NOT set reloadfpga=False - it breaks hardware modules!
                             }
                         }
                         with open(config_path, 'w') as f:
                             yaml.dump(minimal_config, f)
+                        
+                        logger.info("Config created - PyRPL will load FPGA bitstream automatically")
+                    else:
+                        # Config exists - ensure it doesn't have reloadfpga=False
+                        logger.info(f"Loading existing config from {config_path}")
+                        with open(config_path) as f:
+                            existing_config = yaml.safe_load(f)
+                        
+                        config_modified = False
+                        
+                        # Ensure pyrpl modules list is empty (avoid NetworkAnalyzer bugs)
+                        if existing_config and 'pyrpl' in existing_config:
+                            if existing_config['pyrpl'].get('modules') != []:
+                                existing_config['pyrpl']['modules'] = []
+                                config_modified = True
+                                logger.info("Set pyrpl.modules=[] to avoid buggy modules")
+                        
+                        # CRITICAL: Remove any reloadfpga=False settings
+                        if existing_config and 'redpitaya' in existing_config:
+                            if 'reloadfpga' in existing_config['redpitaya']:
+                                if existing_config['redpitaya']['reloadfpga'] == False:
+                                    logger.warning("FIXING CRITICAL BUG: Removing reloadfpga=False from config")
+                                    logger.warning("PyRPL REQUIRES FPGA bitstream to be loaded!")
+                                    del existing_config['redpitaya']['reloadfpga']
+                                    config_modified = True
+                        
+                        if config_modified:
+                            with open(config_path, 'w') as f:
+                                yaml.dump(existing_config, f)
+                            logger.info("Config updated - PyRPL will now load FPGA bitstream correctly")
                     
                     pyrpl_instance = pyrpl.Pyrpl(
                         hostname=hostname,
@@ -133,13 +176,35 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                         source=None  # Let PyRPL use default bitstream
                     )
                     
-                    # Test that we can access a basic module
-                    _ = pyrpl_instance.rp.scope
+                    # ============================================================
+                    # VALIDATION: Test that hardware modules are accessible
+                    # ============================================================
+                    # This verifies the FPGA bitstream was loaded successfully
+                    logger.info("Validating PyRPL hardware module access...")
+                    try:
+                        # Test scope module access
+                        scope_test = pyrpl_instance.rp.scope
+                        logger.info(f"✓ Scope module accessible: {scope_test}")
+                        
+                        # Test that ASG is accessible (critical for signal generation)
+                        asg_test = pyrpl_instance.rp.asg0
+                        logger.info(f"✓ ASG module accessible: {asg_test}")
+                        
+                        # Test PID accessibility
+                        pid_test = pyrpl_instance.rp.pid0
+                        logger.info(f"✓ PID module accessible: {pid_test}")
+                        
+                        logger.info("✓ All critical hardware modules validated successfully")
+                    except AttributeError as e:
+                        logger.error(f"❌ Hardware module validation FAILED: {e}")
+                        logger.error("This indicates FPGA bitstream was NOT loaded properly!")
+                        raise RuntimeError(f"FPGA bitstream validation failed: {e}")
                     
-                    logger.info("PyRPL initialized successfully")
+                    logger.info("PyRPL initialized successfully with FPGA bitstream loaded")
+                    
                     response_queue.put({
                         'status': 'ok',
-                        'data': 'PyRPL initialized'
+                        'data': 'PyRPL initialized with FPGA bitstream loaded'
                     })
                     break  # Success!
                     

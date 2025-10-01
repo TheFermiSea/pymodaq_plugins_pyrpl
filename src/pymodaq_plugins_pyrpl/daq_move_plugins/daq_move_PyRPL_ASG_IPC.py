@@ -36,8 +36,8 @@ from pymodaq.control_modules.move_utility_classes import (
 from pymodaq.utils.daq_utils import ThreadCommand
 from pymodaq.utils.parameter import Parameter
 
-# Import the worker function
-from pymodaq_plugins_pyrpl.utils.pyrpl_ipc_worker import pyrpl_worker_main
+# Import the shared worker manager (singleton pattern)
+from pymodaq_plugins_pyrpl.utils.shared_pyrpl_manager import get_shared_worker_manager
 
 
 class DAQ_Move_PyRPL_ASG_IPC(DAQ_Move_base):
@@ -105,10 +105,10 @@ class DAQ_Move_PyRPL_ASG_IPC(DAQ_Move_base):
         """Initialize the plugin."""
         super().__init__(parent, params_state)
         
-        # IPC using multiprocessing.Queue
+        # Shared worker manager (singleton - one worker shared by all plugins)
+        self.manager = None
         self.command_queue: Optional[Queue] = None
         self.response_queue: Optional[Queue] = None
-        self.worker_process: Optional[Process] = None
         
         # Plugin state
         self.is_connected = False
@@ -260,12 +260,15 @@ class DAQ_Move_PyRPL_ASG_IPC(DAQ_Move_base):
             return error_msg
     
     def close(self):
-        """Close connections and clean up resources."""
+        """
+        Close plugin connection and clean up resources.
+        Does NOT shutdown shared worker - other plugins may be using it.
+        """
         self.emit_status(ThreadCommand('Update_Status',
-            ["Closing PyRPL ASG connection...", 'log']))
+            ["Closing PyRPL ASG plugin connection...", 'log']))
         
-        # Disable ASG output before closing
-        if self.command_queue and self.is_connected:
+        # Optionally disable ASG output before closing
+        if self.manager and self.is_connected:
             try:
                 self._send_command('asg_setup', {
                     'channel': self.settings['asg', 'channel'],
@@ -275,39 +278,14 @@ class DAQ_Move_PyRPL_ASG_IPC(DAQ_Move_base):
             except Exception:
                 pass
         
-        # Send shutdown command
-        if self.command_queue and self.is_connected:
-            try:
-                self.command_queue.put({'command': 'shutdown', 'params': {}})
-                time.sleep(0.5)
-            except Exception:
-                pass
-        
-        # Terminate worker process
-        if self.worker_process and self.worker_process.is_alive():
-            try:
-                self.worker_process.join(timeout=3.0)
-                
-                if self.worker_process.is_alive():
-                    self.worker_process.terminate()
-                    self.worker_process.join(timeout=2.0)
-                
-                if self.worker_process.is_alive():
-                    self.worker_process.kill()
-                    self.worker_process.join()
-            
-            except Exception as e:
-                self.emit_status(ThreadCommand('Update_Status',
-                    [f"Warning: Error terminating worker: {e}", 'log']))
-        
-        # Cleanup resources
-        self.worker_process = None
+        # Clean up local references only
         self.command_queue = None
         self.response_queue = None
+        self.manager = None
         self.is_connected = False
         
         self.emit_status(ThreadCommand('Update_Status',
-            ["PyRPL ASG connection closed", 'log']))
+            ["PyRPL ASG plugin connection closed", 'log']))
     
     def move_abs(self, value):
         """
