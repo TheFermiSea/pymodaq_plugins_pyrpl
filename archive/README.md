@@ -1,76 +1,77 @@
-# Archive
+# Archive Directory
 
-This directory contains historical documentation, test scripts, and obsolete files kept for reference.
+This directory contains historical documentation that was part of the development process but is no longer actively maintained. All files are preserved for historical reference and context.
 
-## Contents
+## Directory Structure
 
-### old_docs/
+### `implementation_docs/`
+Historical implementation notes and progress reports from the development of key features:
+- `COMMAND_MULTIPLEXING_IMPLEMENTATION.md` - Early implementation notes (superseded by COMMAND_MULTIPLEXING_SUMMARY.md)
+- `IMPLEMENTATION_COMPLETE.md` - Completion milestone report
+- `IMPLEMENTATION_ROADMAP.md` - Original implementation planning
+- `IMPLEMENTATION_FLEET_PLAN.md` - Fleet deployment planning
+- `IPC_IMPLEMENTATION_SUMMARY.md` - IPC architecture implementation summary
+- `COMPLETE_IPC_PLUGIN_SUITE.md` - Full plugin suite documentation
+- `PLUGIN_WORKING_CONFIRMATION.md` - Plugin functionality confirmation
 
-Superseded documentation files:
+### `test_reports/`
+Test results, bug fixes, and validation reports:
+- `HARDWARE_TEST_RESULTS.md` - Hardware validation test results
+- `HARDWARE_TEST_FINAL_STATUS.md` - Final hardware test status
+- `HARDWARE_TEST_REPORT.md` - Comprehensive hardware test report
+- `HARDWARE_VALIDATION.md` - Hardware validation procedures
+- `TEST_FIX_SUMMARY.md` - Test suite fixes and improvements
+- `THREADING_FIX_SUMMARY.md` - Threading architecture bug fixes
+- `SSH_CONNECTION_FIX.md` - SSH connection stability fixes
+- `HARDWARE_MODE_FIX.md` - Hardware mode configuration fixes
+- `CLEANUP_SUMMARY.md` - Code cleanup and refactoring summary
+- `RECOVERY_SUMMARY.md` - Recovery from critical bugs
 
-- `HARDWARE_TEST_REPORT.md` - Initial hardware test findings (superseded by docs/HARDWARE_TESTING.md)
-- `HARDWARE_TEST_FINAL_STATUS.md` - Hardware validation status (consolidated into docs/HARDWARE_TESTING.md)
-- `HARDWARE_VALIDATION.md` - Old validation doc (merged into docs/HARDWARE_TESTING.md)
+### `research/`
+Research documents, external queries, and code reviews:
+- `GEMINI_QUERY.md` - Research query sent to Gemini AI
+- `GEMINI_RESPONSE.md` - Research response from Gemini AI
+- `CODE_REVIEW.md` - Code review and analysis
+- `PYRPL_REFACTORING_ROADMAP.md` - PyRPL refactoring plans (archived, not pursued)
 
-**Note:** These files contain useful historical context but have been superseded by the consolidated documentation in the `docs/` directory.
+### `context/`
+Integration context and historical project structure:
+- `INTEGRATION_CONTEXT.md` - PyMoDAQ integration context
+- `INTEGRATION_REPORT.md` - Integration completion report
+- `REPOSITORY_STRUCTURE.md` - Historical repository structure documentation
+- `AGENTS.md` - AI agent configuration documentation
 
-### test_scripts/
-
-Experimental and development test scripts:
-
-- `test_hardware_connection.py` - Early hardware connection tests
-- `test_pyrpl_simple.py` - Minimal PyRPL connection test
-- `test_pyrpl_no_na.py` - Network analyzer bypass attempt
-- `test_with_fixes.py` - Bug fix validation script
-- `test_patch_debug.py` - Patch debugging utilities
-- `test_pid_only.py` - PID-specific testing script
-- `pymodaq_dashboard_fixed.py` - Experimental dashboard modifications
-- `pymodaq_qasync_monkey_patch.py` - Qt/asyncio integration experiments
-- `inspect_pyqtgraph.py` - PyQtGraph compatibility investigation
-
-**Note:** These scripts were used during development to identify and fix bugs. The official test suite is in `tests/` directory. These are preserved for reference but not actively maintained.
+### `old_docs/`
+Previously archived documentation (pre-existing):
+- Various older hardware test reports and documentation
 
 ## Why Archive?
 
-Files are archived (rather than deleted) when they:
-- Contain useful historical information
-- Document problem-solving approaches
-- May be useful for future troubleshooting
-- Are superseded by better implementations
-- Were experimental or one-time use
+These documents are archived to:
+1. **Reduce clutter** - Keep the main repository focused on current documentation
+2. **Preserve history** - Maintain a record of development decisions and progress
+3. **Enable recovery** - Allow future developers to understand how features evolved
+4. **Provide context** - Offer insights into why certain architectural decisions were made
 
 ## Current Documentation
 
 For up-to-date documentation, see:
-- **Main docs:** `../docs/`
-- **Test suite:** `../tests/`
-- **README:** `../README.rst`
+- **Root directory**: `README.md`, `QUICK_START.md`, `COMMAND_MULTIPLEXING_SUMMARY.md`
+- **docs/ directory**: Technical documentation, architecture guides, tutorials
 
-## Restoration
+## Accessing Archived Documents
 
-If you need to reference or restore archived files:
-
-```bash
-# View archived documentation
-cat archive/old_docs/HARDWARE_TEST_REPORT.md
-
-# Run archived test script
-python archive/test_scripts/test_hardware_connection.py
-
-# Restore a file (if needed)
-cp archive/old_docs/some_file.md docs/
-```
+All archived documents remain in version control and can be:
+- Viewed directly in this archive directory
+- Referenced in git history
+- Retrieved if needed for current development
 
 ## Archive Policy
 
-Files may be moved to archive when:
-1. New consolidated documentation replaces multiple old docs
-2. Experimental scripts are superseded by official implementations
-3. Development artifacts are no longer needed for active development
-4. Files provide historical context but aren't part of current workflow
+Documents are archived when they:
+- Are superseded by newer documentation
+- Represent completed milestones (no longer in active development)
+- Contain historical context that may be useful but isn't needed daily
+- Are development artifacts (progress reports, interim test results)
 
-Files are **never** archived if:
-- They are actively used by CI/CD
-- They are referenced by current documentation
-- They contain unique information not preserved elsewhere
-- They are part of the public API or user-facing features
+**Note**: Nothing is ever deleted - if it was valuable enough to create, it's valuable enough to preserve.

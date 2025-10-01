@@ -7,6 +7,7 @@ Comprehensive documentation for the PyRPL/PyMoDAQ integration plugin.
 ### Getting Started
 
 - **[Installation Guide](INSTALLATION.md)** - Complete installation instructions for all platforms
+- **[PyMoDAQ Setup Guide](PYMODAQ_SETUP_GUIDE.md)** - PyMoDAQ-specific setup and configuration
 - **[Developer Guide](DEVELOPER_GUIDE.md)** - Architecture, code structure, and development workflow
 
 ### Testing & Validation
@@ -20,10 +21,17 @@ Comprehensive documentation for the PyRPL/PyMoDAQ integration plugin.
 
 - **[Mock Mode Tutorial](MOCK_TUTORIAL.md)** - Using mock mode for development and testing without hardware
 
-### Advanced Topics
+### Architecture Documentation
 
-- **[Control Theory Foundations](CONTROL_THEORY_FOUNDATIONS.md)** - PID control theory and implementation details
+- **[IPC Architecture](IPC_ARCHITECTURE.md)** - Inter-process communication architecture
+- **[Architecture Review](ARCHITECTURE_REVIEW.md)** - Command multiplexing architecture review
+- **[Shared Worker Architecture](SHARED_WORKER_ARCHITECTURE.md)** - Shared PyRPL worker design
 - **[Threading Architecture](THREADING_ARCHITECTURE.md)** - How PyRPL integrates with PyMoDAQ's multi-threaded framework
+- **[Control Theory Foundations](CONTROL_THEORY_FOUNDATIONS.md)** - PID control theory and implementation details
+
+### Troubleshooting
+
+- **[SSH Connection Troubleshooting](TROUBLESHOOTING_SSH_CONNECTION.md)** - Fixing SSH connection issues with Red Pitaya
 
 ## Quick Links
 
