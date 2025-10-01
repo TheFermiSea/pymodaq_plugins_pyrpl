@@ -114,14 +114,18 @@ class SharedPyRPLManager:
                 self.worker_config = config
                 self.is_running = True
                 
-                # Start response listener thread
-                if not self._response_listener_thread:
+                # Reset shutdown event and start response listener thread
+                self._shutdown_event.clear()  # Reset shutdown signal
+                
+                # Start or restart response listener thread
+                if not self._response_listener_thread or not self._response_listener_thread.is_alive():
                     self._response_listener_thread = threading.Thread(
                         target=self._response_listener,
                         daemon=True,
                         name="PyRPL-ResponseListener",
                     )
                     self._response_listener_thread.start()
+                    logger.info("Response listener thread started")
                 
                 logger.info(f"Started shared PyRPL worker process (PID: {self.worker_process.pid})")
                 return self.command_queue, self.response_queue
