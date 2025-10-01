@@ -165,15 +165,25 @@ class DAQ_Move_PyRPL_PID_IPC(DAQ_Move_base):
     
     def _start_worker(self) -> bool:
         """
-        Start the PyRPL worker process.
+        Start (or connect to) the shared PyRPL worker process.
+        
+        CRITICAL: This method uses SharedPyRPLManager singleton to ensure
+        only ONE PyRPL worker process exists for ALL plugins. This prevents:
+        - Multiple concurrent SSH connections to Red Pitaya
+        - Monitor server conflicts
+        - FPGA bitstream reload issues
+        - "NoneType object is not subscriptable" errors
         
         Returns:
-            True if worker started successfully
+            True if worker is ready and responding
         """
         try:
-            # Create fresh queues
-            self.command_queue = Queue()
-            self.response_queue = Queue()
+            self.emit_status(ThreadCommand('Update_Status',
+                ["Connecting to shared PyRPL worker...", 'log']))
+            
+            # Get the singleton manager instance
+            # This ensures ALL plugins share the same worker process
+            self.manager = get_shared_worker_manager()
             
             # Build configuration
             config = {
@@ -182,41 +192,36 @@ class DAQ_Move_PyRPL_PID_IPC(DAQ_Move_base):
                 'mock_mode': self.settings['dev', 'mock_mode']
             }
             
-            self.emit_status(ThreadCommand('Update_Status',
-                ["Starting PyRPL worker process...", 'log']))
+            # Start worker (or get existing one if already running)
+            # This will start a NEW worker ONLY if none exists
+            # Otherwise it returns the queues to the EXISTING worker
+            self.command_queue, self.response_queue = self.manager.start_worker(config)
             
-            # Start worker process
-            self.worker_process = Process(
-                target=pyrpl_worker_main,
-                args=(self.command_queue, self.response_queue, config),
-                daemon=True
-            )
-            self.worker_process.start()
-            
-            # Wait for initialization confirmation
+            # Test connection with ping command
             timeout = self.settings['connection', 'connection_timeout']
             
-            try:
-                response = self.response_queue.get(timeout=timeout)
-                
-                if response['status'] == 'ok':
-                    self.is_connected = True
-                    self.emit_status(ThreadCommand('Update_Status',
-                        [f"PyRPL worker initialized: {response['data']}", 'log']))
-                    return True
-                else:
-                    self.emit_status(ThreadCommand('Update_Status',
-                        [f"Worker initialization failed: {response['data']}", 'log']))
-                    return False
+            self.emit_status(ThreadCommand('Update_Status',
+                ["Testing worker connection with ping...", 'log']))
             
-            except Empty:
+            response = self.manager.send_command('ping', {}, timeout=timeout)
+            
+            if response['status'] == 'ok' and response['data'] == 'pong':
+                self.is_connected = True
                 self.emit_status(ThreadCommand('Update_Status',
-                    [f"Worker did not respond within {timeout}s", 'log']))
+                    ["Shared PyRPL worker connected successfully", 'log']))
+                return True
+            else:
+                self.emit_status(ThreadCommand('Update_Status',
+                    [f"Worker ping test failed: {response}", 'log']))
                 return False
         
+        except TimeoutError as e:
+            self.emit_status(ThreadCommand('Update_Status',
+                [f"Worker connection timeout: {e}", 'log']))
+            return False
         except Exception as e:
             self.emit_status(ThreadCommand('Update_Status',
-                [f"Failed to start worker: {e}", 'log']))
+                [f"Failed to connect to worker: {e}", 'log']))
             return False
     
     def commit_settings(self, param: Parameter):
