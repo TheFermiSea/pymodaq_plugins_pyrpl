@@ -108,7 +108,8 @@ def pyrpl_worker_main(command_queue: Queue, response_queue: Queue, config: Dict[
                         minimal_config = {
                             'pyrpl': {
                                 'name': config_name,
-                                'modules': [],  # Don't load problematic modules
+                                # DON'T set modules=[] - this disables ALL modules including ASG!
+                                # Instead, let PyRPL load its default modules
                                 'loglevel': 'info',
                                 'background_color': ''
                             },
@@ -403,29 +404,66 @@ def _handle_pyrpl_command(pyrpl: Any, command: str, params: Dict[str, Any]) -> D
         asg_channel = params.get('channel', 'asg0')
         asg = getattr(pyrpl.rp, asg_channel)
         
-        # Configure ASG
+        # Try using the .setup() method as shown in PyRPL docs
+        # This might be required to actually start the ASG
+        setup_kwargs = {}
         if 'waveform' in params:
-            asg.waveform = params['waveform']
-            logger.info(f"ASG {asg_channel} waveform set to: {asg.waveform}")
+            setup_kwargs['waveform'] = params['waveform']
         if 'frequency' in params:
-            asg.frequency = params['frequency']
-            logger.info(f"ASG {asg_channel} frequency set to: {asg.frequency} Hz")
+            setup_kwargs['frequency'] = params['frequency']
         if 'amplitude' in params:
-            asg.amplitude = params['amplitude']
-            logger.info(f"ASG {asg_channel} amplitude set to: {asg.amplitude}V")
+            setup_kwargs['amplitude'] = params['amplitude']
         if 'offset' in params:
-            asg.offset = params['offset']
-            logger.info(f"ASG {asg_channel} offset set to: {asg.offset}V")
+            setup_kwargs['offset'] = params['offset']
         if 'output_direct' in params:
-            asg.output_direct = params['output_direct']
-            logger.info(f"ASG {asg_channel} output_direct set to: {asg.output_direct}")
+            setup_kwargs['output_direct'] = params['output_direct']
         if 'trigger_source' in params:
-            asg.trigger_source = params['trigger_source']
-            logger.info(f"ASG {asg_channel} trigger_source set to: {asg.trigger_source}")
+            setup_kwargs['trigger_source'] = params['trigger_source']
         
-        logger.info(f"ASG {asg_channel} final state: waveform={asg.waveform}, freq={asg.frequency}Hz, "
-                   f"amp={asg.amplitude}V, offset={asg.offset}V, output={asg.output_direct}, "
-                   f"trigger={asg.trigger_source}")
+        logger.info(f"ASG {asg_channel} calling setup() with: {setup_kwargs}")
+        
+        # Call the setup() method instead of setting attributes individually
+        asg.setup(**setup_kwargs)
+        
+        # CRITICAL: Explicitly re-set output_direct AFTER setup()
+        # The warning suggests that reading output_direct triggers the actual write
+        # So we need to force this by reading then writing
+        if 'output_direct' in setup_kwargs:
+            desired_output = setup_kwargs['output_direct']
+            logger.info(f"ASG {asg_channel} forcing output_direct write...")
+            # First read triggers the warning and sets it
+            current_output = asg.output_direct
+            # Then explicitly write to ensure it sticks
+            asg.output_direct = desired_output
+            # Read again to confirm
+            final_output = asg.output_direct
+            logger.info(f"ASG {asg_channel} output_direct: requested={desired_output}, current={current_output}, final={final_output}")
+        
+        # CRITICAL: Explicitly turn ASG ON after all configuration
+        # Maybe setup() doesn't actually enable the output?
+        logger.info(f"ASG {asg_channel} explicitly turning ON...")
+        asg.on = True
+        time.sleep(0.1)  # Give it a moment to take effect
+        
+        # Try additional methods that might be needed to actually start the ASG
+        try:
+            if hasattr(asg, 'start'):
+                logger.info(f"ASG {asg_channel} calling .start()...")
+                asg.start()
+            if hasattr(asg, 'trigger'):
+                logger.info(f"ASG {asg_channel} calling .trigger()...")
+                asg.trigger()
+            if hasattr(asg, 'run'):
+                logger.info(f"ASG {asg_channel} calling .run()...")
+                asg.run()
+        except Exception as e:
+            logger.warning(f"ASG {asg_channel} optional method call failed: {e}")
+        
+        # Check important state attributes after setup
+        logger.info(f"ASG {asg_channel} setup complete. Final state:")
+        logger.info(f"  waveform={asg.waveform}, freq={asg.frequency}Hz")
+        logger.info(f"  amplitude={asg.amplitude}V, offset={asg.offset}V")
+        logger.info(f"  trigger_source={asg.trigger_source}, on={asg.on if hasattr(asg, 'on') else 'N/A'}")
         
         return {'status': 'ok', 'data': None}
     
