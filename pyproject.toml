@@ -1,71 +1,47 @@
-[features]  # defines the plugin features contained into this plugin
-instruments = true  # true if plugin contains instrument classes (else false, notice the lowercase for toml files)
-extensions = true  # true if plugins contains dashboard extensions
-models = true  # true if plugins contains pid models
-h5exporters = false  # true if plugin contains custom h5 file exporters
-scanners = false  # true if plugin contains custom scan layout (daq_scan extensions)
-
-[urls]
-package-url = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl' #todo modify url by your plugin url
-
-[project]
-name = "pymodaq_plugins_pyrpl" #todo modify template by your plugin short name
-description = 'A PyMoDAQ plugin for the Red Pitaya, using the PyRPL library.'
-dependencies = [
-    "pymodaq>=5.0.0",
-    # pyrpl installed separately via install_pyrpl.py due to Python 2 'futures' dependency conflict
-    "qasync>=0.28.0",   # Required for unified Qt/asyncio event loop integration with PyRPL
-    "qtpy>=2.4.1",      # Qt abstraction layer used by plugin
-    "pyqt6>=6.7.1",     # Keeping PyQt6 for Phase 0 (can migrate to PyQt5 in Phase 1 if needed)
-]
-
-authors = [
-    {name = "Brian Squires", email = "brian.squires@unt.edu"},
-    #todo: list here all authors of your plugin
-]
-maintainers = [
-    {name = "Brian Squires", email = "brian.squires@unt.edu"},
-    #todo: list here all maintainers of your plugin
-]
-
-# nottodo: leave everything below as is!
-
-dynamic = ["version", "urls", "entry-points"]
-readme = "README.rst"
-license = { file="LICENSE" }
-requires-python = ">=3.8"
-
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Natural Language :: English",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
-    "Topic :: Scientific/Engineering :: Visualization",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: User Interfaces",
-]
-
 [build-system]
-requires = [
-    "hatchling>=1.9.0",
-    "hatch-vcs", "toml",
-    "pymodaq_utils>=0.0.6",
-]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.metadata.hooks.custom]
+[project]
+name = "pymodaq_plugins_pyrpl"
+version = "1.0.0"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" },
+]
+description = "A PyMoDAQ plugin for PyRPL."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pymodaq",
+    "stemlab @ git+https://github.com/ograsdijk/StemLab.git",
+    "numpy",
+]
 
-[tool.hatch.version]
-source = "vcs"
+[project.urls]
+"Homepage" = "https://github.com/your-username/pymodaq-plugins-pyrpl"
+"Bug Tracker" = "https://github.com/your-username/pymodaq-plugins-pyrpl/issues"
 
-[dependency-groups]
-dev = [
-    "pytest>=8.3.5",
-    "ruff>=0.13.1",
+[project.entry-points."pymodaq.plugins"]
+pyrpl = "pymodaq_plugins_pyrpl"
+
+[project.scripts]
+pyrpl_bridge_server = "pymodaq_plugins_pyrpl.launchers.pyrpl_bridge_server:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+markers = [
+    "hardware: marks tests as requiring real hardware to run",
 ]

@@ -24,6 +24,7 @@ changelog = 'https://github.com/NeogiLabUNT/pymodaq_plugins_pyrpl/releases'
 [entry-points.'pymodaq_plugins_actuators']
 daq_move_PyRPL_PID = "pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_PID"
 daq_move_PyRPL_ASG = "pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_ASG"
+daq_move_PyRPL_ASG_Direct = "pymodaq_plugins_pyrpl.daq_move_plugins.daq_move_PyRPL_ASG_Direct"
 
 ## Viewer Plugins (Detectors)
 ## 0D Plugins - Scalar measurements (voltage, IQ outputs)
