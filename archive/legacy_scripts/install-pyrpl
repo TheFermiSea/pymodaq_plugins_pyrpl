@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""
+PyRPL Installation Script Wrapper
+Simple executable script for installing PyRPL with PyMoDAQ plugins.
+"""
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    
+    # Add the package to Python path if running from development directory
+    try:
+        from pymodaq_plugins_pyrpl.install_pyrpl import main
+    except ImportError:
+        # If package is not installed, try to import from source
+        script_dir = Path(__file__).parent
+        src_dir = script_dir / "src"
+        if src_dir.exists():
+            sys.path.insert(0, str(src_dir))
+            from pymodaq_plugins_pyrpl.install_pyrpl import main
+        else:
+            print("Error: pymodaq_plugins_pyrpl package not found.")
+            print("Please install the package with: uv sync")
+            sys.exit(1)
+    
+    sys.exit(main())
