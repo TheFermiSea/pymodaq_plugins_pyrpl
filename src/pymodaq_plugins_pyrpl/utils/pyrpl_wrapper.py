@@ -486,8 +486,8 @@ class PyRPLConnection:
                 status_callback(ThreadCommand('Update_Status',
                     [f"Connecting to Red Pitaya at {self.hostname}", 'log']))
 
-            # Check if PyRPL is available
-            if not PYRPL_AVAILABLE or pyrpl is None:
+            # Lazy import PyRPL if not already done
+            if not _lazy_import_pyrpl():
                 error_msg = "PyRPL is not available - cannot establish connection"
                 logger.error(error_msg)
                 self.state = ConnectionState.ERROR
@@ -498,10 +498,6 @@ class PyRPLConnection:
                 try:
                     logger.info(f"Connection attempt {attempt + 1}/{self.retry_attempts} to {self.hostname}")
 
-                    # Import PyRPL lazily before using it
-                    if not _lazy_import_pyrpl():
-                        raise ImportError("PyRPL not available - lazy import failed")
-                    
                     # Create PyRPL connection
                     # CRITICAL: gui=False prevents Qt widget creation in PyMoDAQ worker threads
                     # This avoids thread recursion errors when PyRPL's Qt objects run in non-main threads
@@ -1186,19 +1182,8 @@ class PyRPLConnection:
                 # Use config timeout if not specified
                 acq_timeout = timeout if timeout is not None else self._scope_config.timeout
 
-                # Start acquisition
-                start_time = time.time()
-                scope.trigger()
-
-                # Wait for acquisition to complete
-                while not scope.stopped():
-                    if time.time() - start_time > acq_timeout:
-                        logger.error(f"Scope acquisition timeout ({acq_timeout}s)")
-                        return None
-                    time.sleep(0.001)  # 1ms polling interval
-
-                # Get data
-                voltage_data = scope.curve()
+                # Acquire data (curve() handles trigger and wait internally)
+                voltage_data = scope.curve(timeout=acq_timeout)
 
                 # Generate time axis
                 sampling_time = scope.sampling_time

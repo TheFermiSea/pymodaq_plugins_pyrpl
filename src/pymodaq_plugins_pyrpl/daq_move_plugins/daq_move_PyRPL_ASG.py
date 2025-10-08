@@ -366,10 +366,13 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         logger.info("Initializing ASG Plugin")
 
         try:
-            # Extract parameters
-            self.mock_mode = self.settings.child('dev_settings', 'mock_mode').value()
-            auto_connect = self.settings.child('dev_settings', 'auto_connect').value()
-            debug_logging = self.settings.child('dev_settings', 'debug_logging').value()
+            # Extract parameters from refactored structure
+            self.mock_mode = self.settings.child('connection_settings', 'mock_mode').value()
+
+            # Note: auto_connect and debug_logging were removed in params refactoring
+            # Using defaults for now
+            auto_connect = True
+            debug_logging = False
 
             # Setup logging
             self._setup_logging(debug_logging)
@@ -533,10 +536,11 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
         hostname = self.settings.child('connection_settings', 'redpitaya_host').value()
         config_name = self.settings.child('connection_settings', 'config_name').value()
         timeout = self.settings.child('connection_settings', 'connection_timeout').value()
-        retry_attempts = self.settings.child('connection_settings', 'retry_attempts').value()
+        # retry_attempts was removed in params refactoring, use default
+        retry_attempts = 3
 
         # Get ASG channel
-        asg_channel_name = self.settings.child('asg_settings', 'asg_channel').value()
+        asg_channel_name = self.settings.child('asg_config', 'asg_channel').value()
         self.asg_channel = ASGChannel(asg_channel_name)
 
         if auto_connect:
