@@ -19,14 +19,24 @@ Complete guide for testing PyRPL/PyMoDAQ integration with real Red Pitaya hardwa
 - Python 3.11+ environment with plugin installed
 - PyRPL 0.9.6.0+ (latest from GitHub)
 
+### CRITICAL: Verify Hardware Voltage Mode First
+
+**BEFORE RUNNING ANY TESTS**, verify your Red Pitaya's voltage mode configuration. See main README.md for details on LV (±1V) vs HV (±20V) modes.
+
+**Current test suite assumes LV mode (±1V)**. HV mode will cause test failures and incorrect measurements.
+
 ### Running Hardware Tests
 
 ```bash
-# Set your Red Pitaya IP/hostname
-export PYRPL_TEST_HOST=100.107.106.75
+# Step 1: Run environment validation (REQUIRED FIRST)
+python tests/hardware/test_environment.py
 
-# Run hardware test suite
-python -m pytest tests/test_real_hardware_rp_f08d6c.py -v -m hardware
+# Step 2: Run individual plugin tests
+python tests/hardware/test_scope_hardware.py
+python tests/hardware/test_asg_hardware.py
+
+# Or run all hardware tests (requires PyMoDAQ installed)
+python -m pytest tests/hardware/ -v
 ```
 
 ### Quick Connection Test
@@ -157,31 +167,33 @@ These bugs should be reported to the PyRPL project:
 
 ### Successful Tests (Jan 30, 2025)
 
+**Note:** All tests performed in LV mode (±1V). HV mode (±20V) testing pending.
+
 | Component | Status | Details |
 |-----------|--------|---------|
-| Network connectivity | ✅ PASS | Ping successful, 5-90ms latency via Tailscale |
-| SSH authentication | ✅ PASS | Public key auth working |
-| PyRPL import | ✅ PASS | v0.9.6.0 with compatibility patches |
-| Pyrpl() initialization | ✅ PASS | With bug fixes applied |
-| **PID modules** | ✅ PASS | All 3 accessible (pid0-2) |
-| **ASG modules** | ✅ PASS | Both accessible (asg0-1) |
-| **Scope module** | ✅ PASS | Oscilloscope working |
-| **IQ modules** | ✅ PASS | Lock-in amplifiers working |
-| **Voltage sampling** | ✅ PASS | IN1/IN2 reading correctly |
-| **Signal generation** | ✅ PASS | Frequency/amplitude control verified |
+| Network connectivity | PASS | Ping successful, 5-90ms latency via Tailscale |
+| SSH authentication | PASS | Public key auth working |
+| PyRPL import | PASS | v0.9.6.0 with compatibility patches |
+| Pyrpl() initialization | PASS | With bug fixes applied |
+| **PID modules** | PASS | All 3 accessible (pid0-2) |
+| **ASG modules** | PASS | Both accessible (asg0-1) |
+| **Scope module** | PARTIAL | LV mode only - HV mode untested |
+| **IQ modules** | PASS | Lock-in amplifiers working |
+| **Voltage sampling** | PASS | IN1/IN2 reading correctly |
+| **Signal generation** | PASS | Frequency/amplitude control verified |
 
 ### Module Availability Test
 
 ```
 Module availability:
-  ✓ PID Controller 0 (pid0)
-  ✓ PID Controller 1 (pid1)
-  ✓ PID Controller 2 (pid2)
-  ✓ Signal Generator 0 (asg0)
-  ✓ Signal Generator 1 (asg1)
-  ✓ Oscilloscope (scope)
-  ✓ Voltage Sampler (sampler)
-  ✓ Lock-in Amplifier 0 (iq0)
+  [OK] PID Controller 0 (pid0)
+  [OK] PID Controller 1 (pid1)
+  [OK] PID Controller 2 (pid2)
+  [OK] Signal Generator 0 (asg0)
+  [OK] Signal Generator 1 (asg1)
+  [OK] Oscilloscope (scope)
+  [OK] Voltage Sampler (sampler)
+  [OK] Lock-in Amplifier 0 (iq0)
 
 Modules found: 8/8
 ```
@@ -190,17 +202,17 @@ Modules found: 8/8
 
 ```
 Testing PID setpoint control:
-  ✓ Set +0.050V → Read +0.050000V (error: 0.000000V)
-  ✓ Set -0.050V → Read -0.050000V (error: 0.000000V)
-  ✓ Set +0.100V → Read +0.100000V (error: 0.000000V)
-  
+  [OK] Set +0.050V → Read +0.050000V (error: 0.000000V)
+  [OK] Set -0.050V → Read -0.050000V (error: 0.000000V)
+  [OK] Set +0.100V → Read +0.100000V (error: 0.000000V)
+
 Testing PID gains:
-  ✓ P: 1.000 → 1.000 (err: 0.0000)
-  ✓ I: 0.100 → 0.100 (err: 0.0000)
-  
+  [OK] P: 1.000 → 1.000 (err: 0.0000)
+  [OK] I: 0.100 → 0.100 (err: 0.0000)
+
 Testing input routing:
-  ✓ Set input to in1 → Read in1
-  ✓ Set input to in2 → Read in2
+  [OK] Set input to in1 → Read in1
+  [OK] Set input to in2 → Read in2
 ```
 
 ### Signal Generator Tests
@@ -209,7 +221,7 @@ Testing input routing:
 Testing signal generator:
   Set frequency: 1000.0 Hz → Read: 1000.0 Hz
   Set amplitude: 0.1 V → Read: 0.100 V
-  ✓ Signal generator configuration working
+  [OK] Signal generator configuration working
 ```
 
 ### Voltage Monitoring
@@ -218,10 +230,33 @@ Testing signal generator:
 Testing voltage sampling:
   IN1: 0.000000V
   IN2: 0.000000V
-  ✓ Voltage sampling working
+  [OK] Voltage sampling working
 ```
 
 ## Known Issues
+
+### CRITICAL: High-Voltage (HV) Mode Not Supported
+
+**Status:** Known limitation in current version
+
+**Symptom:** If your Red Pitaya is configured in HV mode (±20V via jumpers):
+- Scope acquisition fails with "Result is not set" errors
+- Voltage measurements are incorrect (off by 20x)
+- Trigger settings don't work properly
+
+**Root Cause:** Plugins currently assume LV mode (±1V) voltage scaling. HV mode requires different:
+- Voltage range parameters (20x larger)
+- Trigger level calculations
+- Input/output scaling factors
+
+**Current Workaround:** Only use plugins with Red Pitaya in LV mode (±1V - factory default)
+
+**Planned Fix:** Future update will add `hardware_mode` configuration parameter to support both modes
+
+**How to Check Your Mode:**
+1. Open Red Pitaya case
+2. Check jumper positions (see Red Pitaya hardware manual)
+3. Verify with test: Apply 1.5V battery to input and check reading matches
 
 ### Socket Connection Issue
 
@@ -474,7 +509,7 @@ def emergency_stop(rp):
         asg.amplitude = 0.0
         asg.offset = 0.0
     
-    print("✓ All outputs disabled")
+    print("[OK] All outputs disabled")
 
 # Use when needed
 emergency_stop(p.rp)
