@@ -53,94 +53,6 @@ from ..utils.config import get_pyrpl_config
 logger = logging.getLogger(__name__)
 
 
-def get_pid_parameters():
-    """Generate parameter list with configuration defaults."""
-    try:
-        config = get_pyrpl_config()
-        connection_config = config.get_connection_config()
-        hardware_config = config.get_hardware_config()
-        pid_defaults = hardware_config.get('pid_default_gains', {})
-
-        # Use config values with fallbacks
-        default_hostname = connection_config.get('default_hostname', 'rp-f08d6c.local')
-        default_timeout = connection_config.get('connection_timeout', 10.0)
-        default_config_name = connection_config.get('config_name', 'pymodaq_pyrpl')
-        default_p_gain = pid_defaults.get('p', 0.1)
-        default_i_gain = pid_defaults.get('i', 0.01)
-        default_d_gain = pid_defaults.get('d', 0.0)
-        voltage_range = hardware_config.get('voltage_range', 1.0)
-
-    except Exception as e:
-        logger.warning(f"Failed to load config defaults: {e}, using hardcoded values")
-        # Fallback to hardcoded defaults
-        default_hostname = 'rp-f08d6c.local'
-        default_timeout = 10.0
-        default_config_name = 'pymodaq_pyrpl'
-        default_p_gain = 0.1
-        default_i_gain = 0.01
-        default_d_gain = 0.0
-        voltage_range = 1.0
-
-    return [
-        {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
-            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str',
-             'value': default_hostname, 'tip': 'Red Pitaya hostname or IP address'},
-            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str',
-             'value': default_config_name, 'tip': 'PyRPL configuration name'},
-            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float',
-             'value': default_timeout, 'min': 1.0, 'max': 60.0},
-            {'title': 'Mock Mode:', 'name': 'mock_mode', 'type': 'bool', 'value': False,
-             'tip': 'Enable mock mode for testing without hardware'},
-        ]},
-
-        {'title': 'PID Configuration', 'name': 'pid_config', 'type': 'group', 'children': [
-            {'title': 'PID Module:', 'name': 'pid_module', 'type': 'list',
-             'limits': ['pid0', 'pid1', 'pid2'], 'value': 'pid0',
-             'tip': 'Select PID controller module'},
-            {'title': 'Input Channel:', 'name': 'input_channel', 'type': 'list',
-             'limits': ['in1', 'in2'], 'value': 'in1',
-             'tip': 'PID input channel selection'},
-            {'title': 'Output Channel:', 'name': 'output_channel', 'type': 'list',
-             'limits': ['out1', 'out2'], 'value': 'out1',
-             'tip': 'PID output channel selection'},
-        ]},
-
-        {'title': 'PID Parameters', 'name': 'pid_params', 'type': 'group', 'children': [
-            {'title': 'P Gain:', 'name': 'p_gain', 'type': 'float',
-             'value': default_p_gain, 'min': 0.0, 'max': 10.0, 'step': 0.01,
-             'tip': 'Proportional gain coefficient'},
-            {'title': 'I Gain:', 'name': 'i_gain', 'type': 'float',
-             'value': default_i_gain, 'min': 0.0, 'max': 1.0, 'step': 0.001,
-             'tip': 'Integral gain coefficient'},
-            {'title': 'D Gain:', 'name': 'd_gain', 'type': 'float',
-             'value': default_d_gain, 'min': 0.0, 'max': 1.0, 'step': 0.001,
-             'tip': 'Derivative gain coefficient (usually kept at 0)'},
-        ]},
-
-        {'title': 'Safety Limits', 'name': 'safety_limits', 'type': 'group', 'children': [
-            {'title': 'Min Voltage (V):', 'name': 'min_voltage', 'type': 'float',
-             'value': -voltage_range, 'min': -voltage_range, 'max': 0.0,
-             'tip': 'Minimum allowed setpoint voltage'},
-            {'title': 'Max Voltage (V):', 'name': 'max_voltage', 'type': 'float',
-             'value': voltage_range, 'min': 0.0, 'max': voltage_range,
-             'tip': 'Maximum allowed setpoint voltage'},
-            {'title': 'Enable PID on Connect:', 'name': 'auto_enable_pid', 'type': 'bool',
-             'value': False, 'tip': 'Automatically enable PID output on connection'},
-        ]},
-
-        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
-            {'title': 'Open Native PID GUI', 'name': 'open_native_pid', 'type': 'action',
-             'tip': 'Launch PyRPL native PID widget for advanced configuration and diagnostics'},
-            {'title': 'Open Transfer Function', 'name': 'open_transfer_function', 'type': 'action',
-             'tip': 'Launch PyRPL transfer function analyzer for PID tuning'},
-            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
-             'tip': 'Read current settings from hardware and update PyMoDAQ parameters'},
-            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
-             'value': False, 'tip': 'Show diagnostic information in status messages'},
-        ]},
-    ]
-
-
 class DAQ_Move_PyRPL_PID(DAQ_Move_base):
     """
     PyMoDAQ Actuator Plugin for Red Pitaya PID Setpoint Control.
@@ -182,7 +94,66 @@ class DAQ_Move_PyRPL_PID(DAQ_Move_base):
     _epsilon = 0.001  # 1mV precision for setpoint control
     data_actuator_type = DataActuatorType.DataActuator
 
-    params = get_pid_parameters() + comon_parameters_fun(is_multiaxes=is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
+    # Static parameters with hardcoded defaults (PyMoDAQ pattern)
+    # Users modify these in GUI, saved to presets (NOT config files)
+    params = [
+        {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
+            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str',
+             'value': '100.107.106.75', 'tip': 'Red Pitaya hostname or IP address'},
+            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str',
+             'value': 'pymodaq_pyrpl', 'tip': 'PyRPL configuration name'},
+            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float',
+             'value': 10.0, 'min': 1.0, 'max': 60.0},
+            {'title': 'Mock Mode:', 'name': 'mock_mode', 'type': 'bool', 'value': False,
+             'tip': 'Enable mock mode for testing without hardware'},
+        ]},
+
+        {'title': 'PID Configuration', 'name': 'pid_config', 'type': 'group', 'children': [
+            {'title': 'PID Module:', 'name': 'pid_module', 'type': 'list',
+             'limits': ['pid0', 'pid1', 'pid2'], 'value': 'pid0',
+             'tip': 'Select PID controller module'},
+            {'title': 'Input Channel:', 'name': 'input_channel', 'type': 'list',
+             'limits': ['in1', 'in2'], 'value': 'in1',
+             'tip': 'PID input channel selection'},
+            {'title': 'Output Channel:', 'name': 'output_channel', 'type': 'list',
+             'limits': ['out1', 'out2'], 'value': 'out1',
+             'tip': 'PID output channel selection'},
+        ]},
+
+        {'title': 'PID Parameters', 'name': 'pid_params', 'type': 'group', 'children': [
+            {'title': 'P Gain:', 'name': 'p_gain', 'type': 'float',
+             'value': 0.1, 'min': 0.0, 'max': 10.0, 'step': 0.01,
+             'tip': 'Proportional gain coefficient'},
+            {'title': 'I Gain:', 'name': 'i_gain', 'type': 'float',
+             'value': 0.01, 'min': 0.0, 'max': 1.0, 'step': 0.001,
+             'tip': 'Integral gain coefficient'},
+            {'title': 'D Gain:', 'name': 'd_gain', 'type': 'float',
+             'value': 0.0, 'min': 0.0, 'max': 1.0, 'step': 0.001,
+             'tip': 'Derivative gain coefficient (usually kept at 0)'},
+        ]},
+
+        {'title': 'Safety Limits', 'name': 'safety_limits', 'type': 'group', 'children': [
+            {'title': 'Min Voltage (V):', 'name': 'min_voltage', 'type': 'float',
+             'value': -1.0, 'min': -1.0, 'max': 0.0,
+             'tip': 'Minimum allowed setpoint voltage'},
+            {'title': 'Max Voltage (V):', 'name': 'max_voltage', 'type': 'float',
+             'value': 1.0, 'min': 0.0, 'max': 1.0,
+             'tip': 'Maximum allowed setpoint voltage'},
+            {'title': 'Enable PID on Connect:', 'name': 'auto_enable_pid', 'type': 'bool',
+             'value': False, 'tip': 'Automatically enable PID output on connection'},
+        ]},
+
+        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
+            {'title': 'Open Native PID GUI', 'name': 'open_native_pid', 'type': 'action',
+             'tip': 'Launch PyRPL native PID widget for advanced configuration and diagnostics'},
+            {'title': 'Open Transfer Function', 'name': 'open_transfer_function', 'type': 'action',
+             'tip': 'Launch PyRPL transfer function analyzer for PID tuning'},
+            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
+             'tip': 'Read current settings from hardware and update PyMoDAQ parameters'},
+            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
+             'value': False, 'tip': 'Show diagnostic information in status messages'},
+        ]},
+    ] + comon_parameters_fun(is_multiaxes=is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
 
     def ini_attributes(self):
         """Initialize plugin attributes and connections."""

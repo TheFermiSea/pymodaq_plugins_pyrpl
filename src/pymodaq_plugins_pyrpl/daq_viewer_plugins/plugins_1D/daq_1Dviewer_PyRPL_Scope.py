@@ -181,7 +181,7 @@ class DAQ_1DViewer_PyRPL_Scope(DAQ_Viewer_base):
                     'title': 'RedPitaya Host:',
                     'name': 'redpitaya_host',
                     'type': 'str',
-                    'value': 'rp-f08d6c.local',
+                    'value': '100.107.106.75',
                     'tip': 'Hostname or IP address of Red Pitaya device'
                 },
                 {

@@ -69,89 +69,6 @@ class ASGFrequencyError(ValueError):
     """Custom exception for frequency-related errors."""
 
 
-def get_asg_parameters():
-    """Generate parameter list with configuration defaults."""
-    try:
-        config = get_pyrpl_config()
-        connection_config = config.get_connection_config()
-        hardware_config = config.get_hardware_config()
-        asg_defaults = hardware_config.get('asg_defaults', {})
-
-        # Use config values with fallbacks
-        default_hostname = connection_config.get('default_hostname', 'rp-f08d6c.local')
-        default_timeout = connection_config.get('connection_timeout', 10.0)
-        default_config_name = connection_config.get('config_name', 'pymodaq_pyrpl')
-        default_frequency = asg_defaults.get('frequency', 1000.0)
-        default_amplitude = asg_defaults.get('amplitude', 0.1)
-        default_waveform = asg_defaults.get('waveform', 'sin')
-
-    except Exception as e:
-        logger.warning(f"Failed to load config defaults: {e}, using hardcoded values")
-        # Fallback to hardcoded defaults
-        default_hostname = 'rp-f08d6c.local'
-        default_timeout = 10.0
-        default_config_name = 'pymodaq_pyrpl'
-        default_frequency = 1000.0
-        default_amplitude = 0.1
-        default_waveform = 'sin'
-
-    return [
-        {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
-            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str',
-             'value': default_hostname, 'tip': 'Red Pitaya hostname or IP address'},
-            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str',
-             'value': default_config_name, 'tip': 'PyRPL configuration name'},
-            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float',
-             'value': default_timeout, 'min': 1.0, 'max': 60.0},
-            {'title': 'Mock Mode:', 'name': 'mock_mode', 'type': 'bool', 'value': False,
-             'tip': 'Enable mock mode for testing without hardware'},
-        ]},
-
-        {'title': 'ASG Configuration', 'name': 'asg_config', 'type': 'group', 'children': [
-            {'title': 'ASG Channel:', 'name': 'asg_channel', 'type': 'list',
-             'limits': ['asg0', 'asg1'], 'value': 'asg0',
-             'tip': 'Select ASG module (asg0 or asg1)'},
-            {'title': 'Waveform:', 'name': 'waveform', 'type': 'list',
-             'limits': ['sin', 'cos', 'ramp', 'square', 'noise', 'dc'],
-             'value': default_waveform, 'tip': 'ASG waveform type'},
-        ]},
-
-        {'title': 'Signal Parameters', 'name': 'signal_params', 'type': 'group', 'children': [
-            {'title': 'Frequency (Hz):', 'name': 'frequency', 'type': 'float',
-             'value': default_frequency, 'min': 0.1, 'max': 62.5e6,
-             'tip': 'Signal frequency in Hz'},
-            {'title': 'Amplitude (V):', 'name': 'amplitude', 'type': 'float',
-             'value': default_amplitude, 'min': 0.0, 'max': 1.0, 'step': 0.001,
-             'tip': 'Signal amplitude (0-1V peak)'},
-            {'title': 'Offset (V):', 'name': 'offset', 'type': 'float',
-             'value': 0.0, 'min': -1.0, 'max': 1.0, 'step': 0.001,
-             'tip': 'DC offset voltage'},
-        ]},
-
-        {'title': 'Safety Settings', 'name': 'safety_settings', 'type': 'group', 'children': [
-            {'title': 'Min Frequency (Hz):', 'name': 'min_frequency', 'type': 'float',
-             'value': 0.1, 'min': 0.1, 'max': 1e6,
-             'tip': 'Minimum allowed frequency'},
-            {'title': 'Max Frequency (Hz):', 'name': 'max_frequency', 'type': 'float',
-             'value': 1e6, 'min': 1000.0, 'max': 62.5e6,
-             'tip': 'Maximum allowed frequency'},
-            {'title': 'Enable ASG on Connect:', 'name': 'auto_enable_asg', 'type': 'bool',
-             'value': False, 'tip': 'Automatically enable ASG output on connection'},
-        ]},
-
-        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
-            {'title': 'Open Native ASG GUI', 'name': 'open_native_asg', 'type': 'action',
-             'tip': 'Launch PyRPL native ASG widget for advanced waveform configuration'},
-            {'title': 'Open Spectrum Analyzer', 'name': 'open_spectrum_analyzer', 'type': 'action',
-             'tip': 'Launch PyRPL spectrum analyzer for output signal analysis'},
-            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
-             'tip': 'Read current ASG settings from hardware and update PyMoDAQ parameters'},
-            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
-             'value': False, 'tip': 'Show diagnostic information in status messages'},
-        ]},
-    ]
-
-
 class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     """
     PyMoDAQ Actuator Plugin for Red Pitaya ASG Frequency Control.
@@ -195,7 +112,63 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
     _epsilon = 1.0  # 1Hz precision for frequency control
     data_actuator_type = DataActuatorType.DataActuator
 
-    params = get_asg_parameters() + comon_parameters_fun(is_multiaxes=is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
+    # Static parameters with hardcoded defaults (PyMoDAQ pattern)
+    # Users modify these in GUI, saved to presets (NOT config files)
+    params = [
+        {'title': 'Connection Settings', 'name': 'connection_settings', 'type': 'group', 'children': [
+            {'title': 'RedPitaya Host:', 'name': 'redpitaya_host', 'type': 'str',
+             'value': '100.107.106.75', 'tip': 'Red Pitaya hostname or IP address'},
+            {'title': 'Config Name:', 'name': 'config_name', 'type': 'str',
+             'value': 'pymodaq_pyrpl', 'tip': 'PyRPL configuration name'},
+            {'title': 'Connection Timeout (s):', 'name': 'connection_timeout', 'type': 'float',
+             'value': 10.0, 'min': 1.0, 'max': 60.0},
+            {'title': 'Mock Mode:', 'name': 'mock_mode', 'type': 'bool', 'value': False,
+             'tip': 'Enable mock mode for testing without hardware'},
+        ]},
+
+        {'title': 'ASG Configuration', 'name': 'asg_config', 'type': 'group', 'children': [
+            {'title': 'ASG Channel:', 'name': 'asg_channel', 'type': 'list',
+             'limits': ['asg0', 'asg1'], 'value': 'asg0',
+             'tip': 'Select ASG module (asg0 or asg1)'},
+            {'title': 'Waveform:', 'name': 'waveform', 'type': 'list',
+             'limits': ['sin', 'cos', 'ramp', 'square', 'noise', 'dc'],
+             'value': 'sin', 'tip': 'ASG waveform type'},
+        ]},
+
+        {'title': 'Signal Parameters', 'name': 'signal_params', 'type': 'group', 'children': [
+            {'title': 'Frequency (Hz):', 'name': 'frequency', 'type': 'float',
+             'value': 1000.0, 'min': 0.1, 'max': 62.5e6,
+             'tip': 'Signal frequency in Hz'},
+            {'title': 'Amplitude (V):', 'name': 'amplitude', 'type': 'float',
+             'value': 0.1, 'min': 0.0, 'max': 1.0, 'step': 0.001,
+             'tip': 'Signal amplitude (0-1V peak)'},
+            {'title': 'Offset (V):', 'name': 'offset', 'type': 'float',
+             'value': 0.0, 'min': -1.0, 'max': 1.0, 'step': 0.001,
+             'tip': 'DC offset voltage'},
+        ]},
+
+        {'title': 'Safety Settings', 'name': 'safety_settings', 'type': 'group', 'children': [
+            {'title': 'Min Frequency (Hz):', 'name': 'min_frequency', 'type': 'float',
+             'value': 0.1, 'min': 0.1, 'max': 1e6,
+             'tip': 'Minimum allowed frequency'},
+            {'title': 'Max Frequency (Hz):', 'name': 'max_frequency', 'type': 'float',
+             'value': 1e6, 'min': 1000.0, 'max': 62.5e6,
+             'tip': 'Maximum allowed frequency'},
+            {'title': 'Enable ASG on Connect:', 'name': 'auto_enable_asg', 'type': 'bool',
+             'value': False, 'tip': 'Automatically enable ASG output on connection'},
+        ]},
+
+        {'title': 'Advanced Tools', 'name': 'advanced_tools', 'type': 'group', 'children': [
+            {'title': 'Open Native ASG GUI', 'name': 'open_native_asg', 'type': 'action',
+             'tip': 'Launch PyRPL native ASG widget for advanced waveform configuration'},
+            {'title': 'Open Spectrum Analyzer', 'name': 'open_spectrum_analyzer', 'type': 'action',
+             'tip': 'Launch PyRPL spectrum analyzer for output signal analysis'},
+            {'title': 'Sync from Hardware', 'name': 'sync_from_hardware', 'type': 'action',
+             'tip': 'Read current ASG settings from hardware and update PyMoDAQ parameters'},
+            {'title': 'Advanced Diagnostics', 'name': 'show_diagnostics', 'type': 'bool',
+             'value': False, 'tip': 'Show diagnostic information in status messages'},
+        ]},
+    ] + comon_parameters_fun(is_multiaxes=is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
 
     def ini_attributes(self) -> None:
         """
