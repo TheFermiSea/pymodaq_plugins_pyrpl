@@ -18,67 +18,26 @@ from pymodaq_utils.config import get_set_local_dir
 
 logger = logging.getLogger(__name__)
 
-# Default configuration values
+# Default configuration values - PACKAGE LEVEL SETTINGS ONLY
+# NOTE: Plugin parameter defaults (hostnames, gains, etc.) are defined in plugin classes
+# This config is for application-level settings: logging, paths, performance tuning
 DEFAULT_PYRPL_CONFIG = {
-    'connection': {
-        'default_hostname': 'rp-f08d6c.local',
-        'connection_timeout': 10.0,
-        'config_name': 'pymodaq_pyrpl',
-        'auto_reconnect': True,
-        'retry_attempts': 3,
-        'retry_delay': 2.0
-    },
-    'hardware': {
-        'voltage_range': 1.0,  # ±1V Red Pitaya limit
-        'default_decimation': 64,
-        'max_acquisition_time': 10.0,
-        'pid_default_gains': {
-            'p': 0.1,
-            'i': 0.01,
-            'd': 0.0
-        },
-        'asg_defaults': {
-            'frequency': 1000.0,
-            'amplitude': 0.1,
-            'waveform': 'sin'
-        },
-        'scope_defaults': {
-            'decimation': 64,
-            'trigger_source': 'immediately',
-            'trigger_delay': 0.0,
-            'average': 1
-        },
-        'iq_defaults': {
-            'frequency': 1000.0,
-            'bandwidth': 100.0,
-            'acbandwidth': 10000.0,
-            'phase': 0.0,
-            'gain': 1.0
-        }
-    },
-    'acquisition': {
-        'default_timeout': 2.0,
-        'max_retries': 3,
-        'sampling_rate': 10.0,
-        'max_samples': 16384
-    },
-    'ui': {
-        'update_frequency': 10.0,  # Hz
-        'auto_scale': True,
-        'show_advanced_settings': False,
-        'remember_window_position': True
-    },
     'logging': {
         'enable_debug_logging': False,
         'log_hardware_communications': False,
         'log_file_rotation': True,
-        'max_log_files': 10
+        'max_log_files': 10,
+        'log_level': 'INFO'
     },
-    'mock_mode': {
-        'enabled': False,
-        'noise_level': 0.005,  # 5mV
-        'signal_amplitude': 0.1,  # 100mV
-        'update_rate': 100.0  # Hz
+    'performance': {
+        'thread_pool_size': 4,
+        'connection_pool_max': 5,
+        'cache_timeout': 300  # seconds
+    },
+    'paths': {
+        'config_dir': None,  # Auto-detected if None
+        'log_dir': None,     # Auto-detected if None
+        'cache_dir': None    # Auto-detected if None
     }
 }
 
@@ -270,61 +229,29 @@ class PyRPLConfig(BaseConfig):
             logger.error(f"Failed to set configuration '{key_path}': {e}")
             return False
     
-    def get_connection_config(self) -> Dict[str, Any]:
-        """Get connection-related configuration."""
-        return self._config_data.get('connection', {})
-    
-    def get_hardware_config(self) -> Dict[str, Any]:
-        """Get hardware-related configuration."""
-        return self._config_data.get('hardware', {})
-    
-    def get_acquisition_config(self) -> Dict[str, Any]:
-        """Get acquisition-related configuration."""
-        return self._config_data.get('acquisition', {})
-    
-    def get_ui_config(self) -> Dict[str, Any]:
-        """Get UI-related configuration."""
-        return self._config_data.get('ui', {})
-    
-    def is_mock_mode_enabled(self) -> bool:
-        """Check if mock mode is enabled."""
-        return self.get('mock_mode.enabled', False)
-    
-    def enable_mock_mode(self, enabled: bool = True) -> None:
-        """Enable or disable mock mode."""
-        self.set('mock_mode.enabled', enabled)
-    
-    def get_default_hostname(self) -> str:
-        """Get default Red Pitaya hostname."""
-        return self.get('connection.default_hostname', 'rp-f08d6c.local')
-    
-    def set_default_hostname(self, hostname: str) -> None:
-        """Set default Red Pitaya hostname."""
-        self.set('connection.default_hostname', hostname)
-    
-    def get_pid_defaults(self) -> Dict[str, float]:
-        """Get default PID gains."""
-        return self.get('hardware.pid_default_gains', {'p': 0.1, 'i': 0.01, 'd': 0.0})
-    
-    def update_recent_hostname(self, hostname: str) -> None:
-        """Add hostname to recent connections."""
-        recent = self.get('connection.recent_hostnames', [])
-        
-        # Remove if already exists
-        if hostname in recent:
-            recent.remove(hostname)
-        
-        # Add to front
-        recent.insert(0, hostname)
-        
-        # Keep only last 10
-        recent = recent[:10]
-        
-        self.set('connection.recent_hostnames', recent)
-    
-    def get_recent_hostnames(self) -> list:
-        """Get list of recent hostnames."""
-        return self.get('connection.recent_hostnames', [])
+    def get_logging_config(self) -> Dict[str, Any]:
+        """Get logging configuration."""
+        return self._config_data.get('logging', {})
+
+    def get_performance_config(self) -> Dict[str, Any]:
+        """Get performance tuning configuration."""
+        return self._config_data.get('performance', {})
+
+    def get_paths_config(self) -> Dict[str, Any]:
+        """Get path configuration."""
+        return self._config_data.get('paths', {})
+
+    def is_debug_logging_enabled(self) -> bool:
+        """Check if debug logging is enabled."""
+        return self.get('logging.enable_debug_logging', False)
+
+    def enable_debug_logging(self, enabled: bool = True) -> None:
+        """Enable or disable debug logging."""
+        self.set('logging.enable_debug_logging', enabled)
+
+    def get_log_level(self) -> str:
+        """Get configured log level."""
+        return self.get('logging.log_level', 'INFO')
     
     def reset_to_defaults(self) -> bool:
         """Reset configuration to defaults."""

@@ -69,3 +69,10 @@ dev = [
     "pytest>=8.3.5",
     "ruff>=0.13.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["archive", "deprecated_docs", "development_history", ".git", ".tox", "dist", "build", "*.egg"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
