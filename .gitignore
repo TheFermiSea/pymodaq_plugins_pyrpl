@@ -118,4 +118,30 @@ ai_docs
 old
 development_history
 reference_repos
+
+# IDE and tool configs
+.claude/
+.serena/
+.gemini-clipboard/
+.cursor/
 .roo/
+
+# Binary/generated files
+*.pdf
+index.html
+presentation.*
+
+# Lock files
+uv.lock
+
+# Test/debug scripts in root directory only
+/test_*.py
+/debug_*.py
+/check_*.py
+
+# Large generated directories
+deprecated_docs/
+archive/
+
+# Virtual environments
+venv_test/
