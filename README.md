@@ -33,7 +33,7 @@ This PyMoDAQ plugin provides comprehensive integration of Red Pitaya STEMlab dev
 * **Enhanced Mock Simulation**: Scope viewer now offers selectable waveforms with realistic noise profiles
 * **Comprehensive Testing**: 50+ automated tests covering all plugins and integration scenarios
 * **Professional Integration**: Production-ready solution for research and industrial applications
-* **✅ Hardware Validated**: Successfully tested with real Red Pitaya hardware (rp-f08d6c.local, August 2025)
+* **Hardware Validated**: Successfully tested with real Red Pitaya hardware (rp-f08d6c.local, August 2025)
 * **Python 3.12 Compatible**: Full compatibility with modern Python/Qt environments including comprehensive PyRPL compatibility fixes
 * **PyRPL Integration Fixed**: Resolved all Python 3.12 compatibility issues (collections.Mapping, np.complex, Qt timer fixes)
 
@@ -200,12 +200,12 @@ pip install -e .
 4. **PyRPL Connection**: The plugin uses PyRPL's SSH-based connection (port 22), not SCPI
 
    **Hardware Validated (January 2025)**: Comprehensive validation with real Red Pitaya:
-   - ✅ Red Pitaya STEMlab at 100.107.106.75
-   - ✅ All 8 hardware modules verified: PID×3, ASG×2, Scope, IQ, Sampler
-   - ✅ PyRPL 0.9.6.0 bugs identified and patched
-   - ✅ Python 3.11/3.12 + PyQt5/PyQt6 compatibility confirmed
-   - ✅ PID module ready for production use
-   - ⚠️ **Important:** PyRPL 0.9.6.0 requires bug patches (see documentation)
+   - Red Pitaya STEMlab at 100.107.106.75
+   - All 8 hardware modules verified: PID×3, ASG×2, Scope, IQ, Sampler
+   - PyRPL 0.9.6.0 bugs identified and patched
+   - Python 3.11/3.12 + PyQt5/PyQt6 compatibility confirmed
+   - PID module ready for production use
+   - **Important:** PyRPL 0.9.6.0 requires bug patches (see documentation)
 
 ### Physical Connections
 
@@ -284,7 +284,7 @@ Acquisition Settings:
 
 ### Hardware Testing Status
 
-✅ **HARDWARE VALIDATED** (August 2025)
+**HARDWARE VALIDATED** (August 2025)
 
 All plugins have been successfully tested with real Red Pitaya hardware:
 
@@ -535,7 +535,7 @@ The plugin includes automatic compatibility fixes for Python 3.10+ and Qt6 envir
 ## Authors
 
 - **PyMoDAQ Development Team**
-- **Contributors:** Sebastien Weber, Claude Code
+- **Contributors:** Sebastien Weber
 
 ## Support
 

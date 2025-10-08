@@ -29,12 +29,12 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
 ```
 
 **Issues:**
-1. ❌ Config file values override parameter defaults
-2. ❌ Creates "hidden state" - users can't see what defaults will be used
-3. ❌ Config has priority over code fallbacks
-4. ❌ Violates PyMoDAQ's "GUI-first" design principle
-5. ❌ Makes debugging difficult
-6. ❌ Reduces reproducibility
+1. Config file values override parameter defaults
+2. Creates "hidden state" - users can't see what defaults will be used
+3. Config has priority over code fallbacks
+4. Violates PyMoDAQ's "GUI-first" design principle
+5. Makes debugging difficult
+6. Reduces reproducibility
 
 ### Correct Pattern (After Fix)
 
@@ -53,11 +53,11 @@ class DAQ_Move_PyRPL_ASG(DAQ_Move_base):
 ```
 
 **Benefits:**
-1. ✅ All defaults visible in code (version controlled)
-2. ✅ No hidden state from config files
-3. ✅ Users modify in GUI, saved to presets (proper PyMoDAQ flow)
-4. ✅ Config files only for package-level settings
-5. ✅ Reproducible and predictable behavior
+1. All defaults visible in code (version controlled)
+2. No hidden state from config files
+3. Users modify in GUI, saved to presets (proper PyMoDAQ flow)
+4. Config files only for package-level settings
+5. Reproducible and predictable behavior
 
 ---
 
@@ -91,13 +91,13 @@ Before (includes plugin parameters):
 ```python
 DEFAULT_PYRPL_CONFIG = {
     'connection': {
-        'default_hostname': '100.107.106.75',  # ❌ Plugin parameter!
+        'default_hostname': '100.107.106.75',  # Plugin parameter!
         'connection_timeout': 10.0,
         # ...
     },
     'hardware': {
-        'pid_default_gains': {...},  # ❌ Plugin parameter!
-        'asg_defaults': {...},       # ❌ Plugin parameter!
+        'pid_default_gains': {...},  # Plugin parameter!
+        'asg_defaults': {...},       # Plugin parameter!
         # ...
     },
     # ... more plugin-specific settings
@@ -176,12 +176,12 @@ cache_timeout = 300
 ## Verification
 
 ### Code Changes Verified:
-- ✅ `get_asg_parameters()` removed from ASG plugin
-- ✅ `get_pid_parameters()` removed from PID plugin
-- ✅ ASG `params` now static with hardcoded defaults
-- ✅ PID `params` now static with hardcoded defaults
-- ✅ Config system simplified to package-level settings only
-- ✅ Config file updated to simplified structure
+- `get_asg_parameters()` removed from ASG plugin
+- `get_pid_parameters()` removed from PID plugin
+- ASG `params` now static with hardcoded defaults
+- PID `params` now static with hardcoded defaults
+- Config system simplified to package-level settings only
+- Config file updated to simplified structure
 
 ### Expected Behavior:
 1. **Plugin Discovery:** Plugins will be discovered normally via entry points
@@ -259,7 +259,7 @@ pymodaq_plugin_manager -l
 
    NOT:
    ```
-   Config file (loads) → Code (overrides) → GUI (shows value) ❌
+   Config file (loads) → Code (overrides) → GUI (shows value) [INCORRECT]
    ```
 
 ---
@@ -277,7 +277,7 @@ pymodaq_plugin_manager -l
 
 ## Status
 
-✅ **Architectural Fix Complete**
+**Architectural Fix Complete**
 
 All plugins now follow PyMoDAQ's proper pattern:
 - Static parameters with hardcoded defaults

@@ -10,17 +10,17 @@ Hardware testing has been initiated with the real Red Pitaya device. The **archi
 
 ## Test Environment Status
 
-### ✅ Environment Validation - PASSED
+### Environment Validation - PASSED
 
 All environment tests passed successfully:
 
 | Test | Status | Details |
 |------|--------|---------|
-| Red Pitaya Connectivity | ✓ PASS | SSH port 22 reachable at 100.107.106.75 |
-| PyMoDAQ Installation | ✓ PASS | Version 5.0.18 installed and importable |
-| PyRPL Library Availability | ✓ PASS | stemlab (headless fork) available |
-| Plugin Imports | ✓ PASS | All plugins import without config file I/O |
-| Static Params Verification | ✓ PASS | Hardcoded hostname 100.107.106.75 confirmed |
+| Red Pitaya Connectivity | PASS | SSH port 22 reachable at 100.107.106.75 |
+| PyMoDAQ Installation | PASS | Version 5.0.18 installed and importable |
+| PyRPL Library Availability | PASS | stemlab (headless fork) available |
+| Plugin Imports | PASS | All plugins import without config file I/O |
+| Static Params Verification | PASS | Hardcoded hostname 100.107.106.75 confirmed |
 
 **Conclusion:** Environment is READY for hardware testing.
 
@@ -30,20 +30,20 @@ All environment tests passed successfully:
 
 | Test | Status | Details |
 |------|--------|---------|
-| Plugin Initialization | ✓ PASS | DAQ_1DViewer_PyRPL_Scope instantiates correctly |
-| Hardware Connection | ✓ PASS | Successfully connects to Red Pitaya 100.107.106.75 |
-| Data Acquisition | ✗ FAIL | pyrpl curve() returns "Result is not set" |
-| Parameter Changes | ✓ PASS | Parameters can be modified |
-| Graceful Shutdown | ✓ PASS | Plugin closes cleanly |
+| Plugin Initialization | PASS | DAQ_1DViewer_PyRPL_Scope instantiates correctly |
+| Hardware Connection | PASS | Successfully connects to Red Pitaya 100.107.106.75 |
+| Data Acquisition | FAIL | pyrpl curve() returns "Result is not set" |
+| Parameter Changes | PASS | Parameters can be modified |
+| Graceful Shutdown | PASS | Plugin closes cleanly |
 
 ### Critical Finding: Architectural Fix VALIDATED
 
 **The architectural fix is working correctly with real hardware:**
 
-1. ✅ Plugins load without triggering config file I/O
-2. ✅ Hardcoded hostname (100.107.106.75) is used successfully
-3. ✅ Hardware connection establishes using static params
-4. ✅ PyRPLManager and PyRPLConnection work as designed
+1. Plugins load without triggering config file I/O
+2. Hardcoded hostname (100.107.106.75) is used successfully
+3. Hardware connection establishes using static params
+4. PyRPLManager and PyRPLConnection work as designed
 
 **Connection Log Evidence:**
 ```
@@ -65,8 +65,8 @@ INFO: PASS: Successfully connected to Red Pitaya hardware
 - The scope configuration appears correct (trigger_source: immediately, decimation: 1024)
 
 **Bugs Fixed During Testing:**
-1. ✅ Fixed lazy import of pyrpl - was being checked before being called
-2. ✅ Fixed scope.trigger() call - replaced with scope.curve() as per pyrpl API
+1. Fixed lazy import of pyrpl - was being checked before being called
+2. Fixed scope.trigger() call - replaced with scope.curve() as per pyrpl API
 
 **Remaining Issue:**
 - Need to investigate correct pyrpl scope acquisition sequence
@@ -95,7 +95,7 @@ if not _lazy_import_pyrpl():
     return False
 ```
 
-**Impact:** Hardware connection now works ✓
+**Impact:** Hardware connection now works
 
 ### 2. Scope Acquisition API Fix (pyrpl_wrapper.py:1185-1186)
 
@@ -121,7 +121,7 @@ voltage_data = scope.curve(timeout=acq_timeout)
 - Changed `DataActuator` → `DataRaw` (PyMoDAQ 5.x API)
 - Changed `DAQ_1Dviewer_PyRPL_Scope` → `DAQ_1DViewer_PyRPL_Scope` (correct class name)
 
-**Impact:** All environment tests now pass ✓
+**Impact:** All environment tests now pass
 
 ## Next Steps
 
@@ -155,12 +155,12 @@ voltage_data = scope.curve(timeout=acq_timeout)
 ## Hardware Test Files Created
 
 - `/tests/hardware/__init__.py` - Package marker
-- `/tests/hardware/test_environment.py` - Environment validation (ALL TESTS PASS ✓)
-- `/tests/hardware/test_scope_hardware.py` - Scope plugin testing (CONNECTION WORKS ✓)
+- `/tests/hardware/test_environment.py` - Environment validation (ALL TESTS PASS)
+- `/tests/hardware/test_scope_hardware.py` - Scope plugin testing (CONNECTION WORKS)
 
 ## Verdict So Far
 
-### What Works ✓
+### What Works
 
 1. Static params architectural pattern
 2. Hardware connection establishment
@@ -168,7 +168,7 @@ voltage_data = scope.curve(timeout=acq_timeout)
 4. PyRPL/stemlab integration architecture
 5. Connection management and lifecycle
 
-### What Needs Work ✗
+### What Needs Work
 
 1. Scope data acquisition API compatibility
 2. Possible timeout handling improvements
@@ -190,10 +190,10 @@ The core architectural change (static params, no config I/O at import) has been 
 Key log entries showing successful architectural fix validation:
 
 ```
-✓ red_pitaya_connectivity........................... PASS
-✓ pymodaq_installation.............................. PASS
-✓ pyrpl_availability................................ PASS
-✓ plugin_imports.................................... PASS
+red_pitaya_connectivity........................... PASS
+pymodaq_installation.............................. PASS
+pyrpl_availability................................ PASS
+plugin_imports.................................... PASS
 
 INFO: PASS: All plugins import successfully
 INFO: PASS: Static params pattern verified
@@ -201,6 +201,6 @@ INFO: PASS: Architectural fix confirmed (no config I/O at import)
 INFO: PASS: ASG hardcoded hostname: 100.107.106.75
 
 INFO: Successfully connected to Red Pitaya 100.107.106.75
-✓ plugin_initialization............................. PASS
-✓ hardware_connection............................... PASS
+plugin_initialization............................. PASS
+hardware_connection............................... PASS
 ```
