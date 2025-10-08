@@ -45,3 +45,10 @@ allow-direct-references = true
 markers = [
     "hardware: marks tests as requiring real hardware to run",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["archive", "deprecated_docs", "development_history", ".git", ".tox", "dist", "build", "*.egg"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
